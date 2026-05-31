@@ -55,4 +55,39 @@ def scaffold_book(title: str, dest: Path, num_chapters: int = 1) -> list[str]:
             ),
             encoding="utf-8",
         )
+
+    bible_yaml = dest / "bible.yaml"
+    if not bible_yaml.exists():
+        bible_yaml.write_text(
+            yaml.dump(
+                _bible_stub_dict(title, num_chapters),
+                allow_unicode=True,
+                sort_keys=False,
+            ),
+            encoding="utf-8",
+        )
     return chapter_files
+
+
+def _bible_stub_dict(title: str, num_chapters: int) -> dict:
+    """A starter bible.yaml (canon) with one empty beat per chapter to fill in."""
+    return {
+        "title": title,
+        "logline": "",
+        "themes": [],
+        "characters": [
+            {
+                "name": "",
+                "role": "",
+                "description": "",
+                "voice": "",
+                "arc": "",
+                "status": "alive",
+                "first_appears": 1,
+            }
+        ],
+        "beats": [
+            {"chapter": n, "summary": "", "advances": [], "state_changes": []}
+            for n in range(1, num_chapters + 1)
+        ],
+    }

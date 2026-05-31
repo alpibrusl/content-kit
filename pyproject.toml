@@ -70,6 +70,7 @@ omit = [
     "*/writers/claude.py",
     "*/writers/ollama.py",
     "*/writers/openai_writer.py",
+    "*/writers/openai_compat.py",
 ]
 
 [tool.coverage.report]

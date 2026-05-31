@@ -64,6 +64,27 @@ Every command supports `--output json` for agent pipelines and returns semantic 
 
 ---
 
+## Continuity (the bible)
+
+For plot/character coherence across chapters — and across correlated books in a series —
+`bookkit` keeps a **`bible.yaml`**: a structured, committed canon of characters (with their
+voice and mutable status), the world, the timeline, and per-chapter plot beats. `bookkit new`
+scaffolds a starter `bible.yaml`, and `bookkit write outline` emits a filled one alongside the
+prose outline. The canon is plain, auditable data — continuity lives in source control, not in
+a model's memory. Full design (running recaps, series bibles, and a `check continuity` guard):
+[`docs/continuity.md`](docs/continuity.md).
+
+## LLM-agnostic
+
+Every AI-assisted command (`write outline`, `write chapter`) is provider-neutral. Pick a
+backend with `-w` (`claude` | `openai` | `ollama` | `openai_compat`) or set a default with
+`$BOOKKIT_WRITER` / `$BOOKKIT_MODEL`. The `openai_compat` backend talks to **any**
+OpenAI-compatible endpoint — local (llama.cpp, vLLM, LM Studio) or hosted (OpenRouter,
+Together, Groq, …) — via `$BOOKKIT_LLM_BASE_URL` + `$BOOKKIT_LLM_API_KEY`, with no SDK or
+extra required. The default stays local and keyless so it runs offline out of the box.
+
+---
+
 ## `book.yaml` reference
 
 ```yaml

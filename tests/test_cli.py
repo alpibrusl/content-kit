@@ -32,6 +32,13 @@ def test_new_scaffolds_book(tmp_path: Path) -> None:
     assert (book_dir / "book.yaml").exists()
     assert (book_dir / "chapters" / "01-chapter.md").exists()
     assert (book_dir / "chapters" / "03-chapter.md").exists()
+    # Phase 1: a starter bible.yaml (canon) is scaffolded with one beat per chapter.
+    bible_path = book_dir / "bible.yaml"
+    assert bible_path.exists()
+    from bookkit.bible import load_bible
+
+    bible = load_bible(bible_path)
+    assert [b.chapter for b in bible.beats] == [1, 2, 3]
 
 
 def test_build_missing_config_errors(tmp_path: Path) -> None:

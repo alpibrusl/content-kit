@@ -9,18 +9,20 @@ import yaml
 
 from ._errors import BookKitError
 from ._exit_codes import ExitCode
+from ._extract import split_prose_and_yaml
 from ._output import (
     OutputFormat,
     emit,
     error_envelope,
     success_envelope,
 )
+from .bible import BibleConfig, dump_bible
 from .bind import bind
 from .config import BookConfig
 from .prompts import build_chapter_prompts, build_outline_prompts
 from .renderers import VALID_FORMATS
 from .scaffold import scaffold_book
-from .writers import get_writer
+from .writers import default_writer_name, get_writer
 
 VERSION = "0.1.0"
 
@@ -197,22 +199,55 @@ def cmd_write_outline(
     chapters: int = typer.Option(
         10, "--chapters", "-n", help="Target number of chapters in the outline."
     ),
-    writer: str = typer.Option(
-        "ollama", "--writer", "-w", help="LLM backend (claude|ollama|openai)."
+    writer: str | None = typer.Option(
+        None,
+        "--writer",
+        "-w",
+        help="LLM backend (claude|ollama|openai|openai_compat). "
+        "Default: $BOOKKIT_WRITER, else ollama.",
     ),
-    model: str | None = typer.Option(None, "--model", "-m", help="Override the model name."),
+    model: str | None = typer.Option(
+        None, "--model", "-m", help="Override the model name (else $BOOKKIT_MODEL)."
+    ),
     out: Path = typer.Option(
-        Path("outline.md"), "--output", "-o", help="Path to write the outline."
+        Path("outline.md"), "--output", "-o", help="Path to write the prose outline."
+    ),
+    bible_out: Path = typer.Option(
+        Path("bible.yaml"), "--bible", help="Path to write the structured bible (canon)."
     ),
 ) -> None:
-    """Generate a book outline (the 'bible') from a concept."""
+    """Generate a prose outline AND a structured bible.yaml (canon) from a concept."""
+    cmd = "write outline"
+    writer_name = writer or default_writer_name()
     system, user = build_outline_prompts(concept, chapters)
     try:
-        text = get_writer(writer, model).complete(system, user)
+        text = get_writer(writer_name, model).complete(system, user)
     except (RuntimeError, ValueError) as exc:
-        _die("write outline", OutputFormat.text, code=ExitCode.UPSTREAM_ERROR, message=str(exc))
-    out.write_text(text.strip() + "\n", encoding="utf-8")
-    print(f"Wrote outline to {out} ({len(text)} chars)")
+        _die(cmd, OutputFormat.text, code=ExitCode.UPSTREAM_ERROR, message=str(exc))
+
+    prose, yaml_block = split_prose_and_yaml(text)
+    out.write_text(prose + "\n", encoding="utf-8")
+
+    # Parse the structured canon defensively; fall back to a minimal valid stub so a
+    # weaker model that skipped (or malformed) the YAML never blocks the workflow.
+    bible: BibleConfig
+    bible_note = "parsed from model output"
+    if yaml_block:
+        try:
+            bible = BibleConfig.model_validate(yaml.safe_load(yaml_block) or {})
+        except Exception:
+            bible = BibleConfig(beats=[{"chapter": i} for i in range(1, chapters + 1)])
+            bible_note = "model YAML invalid — wrote a stub to fill in"
+    else:
+        bible = BibleConfig(beats=[{"chapter": i} for i in range(1, chapters + 1)])
+        bible_note = "model emitted no YAML — wrote a stub to fill in"
+    bible_out.write_text(dump_bible(bible), encoding="utf-8")
+
+    print(f"Wrote outline to {out} ({len(prose)} chars)")
+    print(
+        f"Wrote bible to {bible_out} ({len(bible.characters)} characters, "
+        f"{len(bible.beats)} beats) — {bible_note}"
+    )
 
 
 @write_app.command("chapter")
@@ -222,16 +257,23 @@ def cmd_write_chapter(
     summary: str = typer.Option("", "--summary", "-s", help="Optional summary for this chapter."),
     title: str = typer.Option("", "--title", "-t", help="Optional chapter title."),
     words: int = typer.Option(2000, "--words", help="Target word count."),
-    writer: str = typer.Option(
-        "ollama", "--writer", "-w", help="LLM backend (claude|ollama|openai)."
+    writer: str | None = typer.Option(
+        None,
+        "--writer",
+        "-w",
+        help="LLM backend (claude|ollama|openai|openai_compat). "
+        "Default: $BOOKKIT_WRITER, else ollama.",
     ),
-    model: str | None = typer.Option(None, "--model", "-m", help="Override the model name."),
+    model: str | None = typer.Option(
+        None, "--model", "-m", help="Override the model name (else $BOOKKIT_MODEL)."
+    ),
     out: Path = typer.Option(
         None, "--output", "-o", help="Output path (default: chapters/NN-*.md)."
     ),
 ) -> None:
     """Generate a chapter's prose from an outline."""
     cmd = "write chapter"
+    writer_name = writer or default_writer_name()
     if not outline.exists():
         _die(
             cmd, OutputFormat.text, code=ExitCode.NOT_FOUND, message=f"outline not found: {outline}"
@@ -240,7 +282,7 @@ def cmd_write_chapter(
 
     system, user = build_chapter_prompts(outline_text, chapter, summary, title, words)
     try:
-        text = get_writer(writer, model).complete(system, user)
+        text = get_writer(writer_name, model).complete(system, user)
     except (RuntimeError, ValueError) as exc:
         _die(cmd, OutputFormat.text, code=ExitCode.UPSTREAM_ERROR, message=str(exc))
 
