@@ -27,7 +27,8 @@ from .bind import bind
 from .config import BookConfig
 from .prompts import build_chapter_prompts, build_outline_prompts, build_recap_prompts
 from .renderers import VALID_FORMATS
-from .scaffold import scaffold_book
+from .scaffold import scaffold_book, scaffold_series
+from .series import load_series, merge_shared_characters, series_context_text
 from .writers import default_writer_name, get_writer
 
 VERSION = "0.1.0"
@@ -198,6 +199,37 @@ def cmd_build(
 write_app = typer.Typer(name="write", help="AI-assisted writing commands (outline, chapters).")
 app.add_typer(write_app)
 
+series_app = typer.Typer(name="series", help="Manage a collection of correlated books.")
+app.add_typer(series_app)
+
+
+@series_app.command("new")
+def cmd_series_new(
+    title: str = typer.Argument(..., help="Series title (used as the collection dir name)."),
+    books: int = typer.Option(3, "--books", "-n", help="Number of books in the series."),
+    chapters: int = typer.Option(1, "--chapters", "-c", help="Chapter stubs to create per book."),
+    dest: Path = typer.Option(
+        Path("."), "--dest", "-d", help="Parent directory for the new collection."
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", "-o", help="Output format (text|json)."
+    ),
+) -> None:
+    """Scaffold a collection: a series.yaml plus linked book sub-directories."""
+    t0 = time.time()
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-") or "series"
+    coll_dir = dest.resolve() / slug
+    book_dirs = scaffold_series(title, coll_dir, num_books=books, chapters_per_book=chapters)
+
+    data = {"series": title, "path": str(coll_dir), "books": book_dirs}
+    if output == OutputFormat.text:
+        print(f"Created series '{title}' at {coll_dir}")
+        print("  series.yaml")
+        for b in book_dirs:
+            print(f"  {b}/ (book.yaml, bible.yaml, chapters/)")
+    else:
+        emit(success_envelope("series new", data, start_time=t0), output)
+
 
 @write_app.command("outline")
 def cmd_write_outline(
@@ -302,10 +334,27 @@ def cmd_write_chapter(
     # Continuity layers (all optional; degrade gracefully if absent).
     canon = ""
     beat_summary = summary
-    bible_file = bible_path or (book_dir / "bible.yaml")
+    series_context = ""
     sources_used = []
-    if bible_file.exists():
-        bible = load_bible(bible_file)
+
+    bible_file = bible_path or (book_dir / "bible.yaml")
+    bible = load_bible(bible_file) if bible_file.exists() else None
+
+    # Series: if book.yaml links a series.yaml, fold in the shared cast and the
+    # predecessor book's ending state so this book continues from where that ended.
+    book_yaml = book_dir / "book.yaml"
+    if book_yaml.exists():
+        bconf = BookConfig.model_validate(yaml.safe_load(book_yaml.read_text(encoding="utf-8")))
+        if bconf.series:
+            series_path = book_dir / bconf.series
+            if series_path.exists():
+                series = load_series(series_path)
+                series_context = series_context_text(series, book_dir.name)
+                bible = merge_shared_characters(series, bible or BibleConfig())
+                if series_context:
+                    sources_used.append("series")
+
+    if bible is not None:
         canon = bible_to_prompt_text(bible, upto_chapter=chapter)
         beat = bible.beat_for(chapter)
         if beat and not summary:
@@ -326,6 +375,7 @@ def cmd_write_chapter(
         title,
         words,
         canon=canon,
+        series_context=series_context,
         recap=recap,
         prev_chapter=prev,
     )
@@ -537,6 +587,24 @@ def cmd_introspect(
                         "default": "$BOOKKIT_WRITER|ollama",
                     },
                     {"name": "--model", "short": "-m", "type": "string", "default": None},
+                ],
+            },
+            {
+                "name": "series new",
+                "description": "Scaffold a collection of correlated books: a series.yaml "
+                "plus linked book sub-directories.",
+                "idempotent": False,
+                "arguments": [{"name": "title", "required": True, "description": "Series title."}],
+                "options": [
+                    {"name": "--books", "short": "-n", "type": "integer", "default": 3},
+                    {"name": "--chapters", "short": "-c", "type": "integer", "default": 1},
+                    {"name": "--dest", "short": "-d", "type": "path", "default": "."},
+                    {
+                        "name": "--output",
+                        "short": "-o",
+                        "type": "enum[text|json]",
+                        "default": "text",
+                    },
                 ],
             },
         ],

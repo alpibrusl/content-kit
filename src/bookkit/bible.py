@@ -39,6 +39,17 @@ class StateChange(BaseModel):
         return v or {}
 
 
+def coerce_state_changes(v: Any) -> Any:
+    """Normalize a state_changes list: bare strings become {note: ...} entries.
+
+    Shared by Beat and by the series model so the same lenient YAML works anywhere
+    a list of canonical changes is accepted.
+    """
+    if not v:
+        return []
+    return [{"note": item} if isinstance(item, str) else item for item in v]
+
+
 class Character(BaseModel):
     name: str
     aka: list[str] = []
@@ -74,15 +85,7 @@ class Beat(BaseModel):
     @classmethod
     def _coerce_state_changes(cls, v: Any) -> Any:
         """Allow bare strings in state_changes: 'X happened' -> {note: 'X happened'}."""
-        if not v:
-            return []
-        out: list[Any] = []
-        for item in v:
-            if isinstance(item, str):
-                out.append({"note": item})
-            else:
-                out.append(item)
-        return out
+        return coerce_state_changes(v)
 
 
 class BibleConfig(BaseModel):

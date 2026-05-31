@@ -40,6 +40,7 @@ class BookConfig(BaseModel):
     output: str = "book.epub"  # final artifact filename; extension swapped per --format
     cover: str = ""  # path to a cover image (PNG/JPG), relative to the book directory
     isbn: str = ""
+    series: str = ""  # optional path to a series.yaml (relative to the book dir)
     theme: Theme = Theme()
     chapters: list[ChapterEntry]  # ordered, like an episode timeline
     front_matter: list[Literal["title_page", "copyright", "toc"]] = ["title_page", "toc"]

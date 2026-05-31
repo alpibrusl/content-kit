@@ -88,8 +88,31 @@ How coherence is actually enforced:
   proposes canonical state changes (e.g. a character departs); `--apply` writes them back into
   `bible.yaml`, so the *next* chapter is generated against the updated state.
 
-Still to come (designed, not yet built): **series bibles** for correlated books and a
-`check continuity` guard. Full design: [`docs/continuity.md`](docs/continuity.md).
+### Correlated books (series)
+
+`bookkit series new "<Title>" -n 3` scaffolds a **collection**: a `series.yaml` (the cross-book
+canon — shared cast, the overall arc, and each book's role and ending state) plus linked book
+sub-directories. When a book's `book.yaml` points at the series, `write chapter` folds the
+**shared cast** into that book's canon and feeds the **previous book's ending state** into the
+prompt — so book 2 is written knowing how book 1 left things:
+
+```yaml
+# series.yaml
+series: "The Compliance Cycle"
+arc: "The Engine moves from tool to author of the rules."
+shared_characters:
+  - { name: "MARA", role: protagonist, voice: "Clipped." }
+books:
+  - dir: book-01
+    role: setup
+    ends_with_state: [{ character: "MARA", set: { status: fugitive } }]
+  - dir: book-02
+    role: escalation
+    opens_from: book-01      # inherits book-01's ending state as opening canon
+```
+
+Still to come (designed, not yet built): a `check continuity` guard.
+Full design: [`docs/continuity.md`](docs/continuity.md).
 
 ## LLM-agnostic
 
@@ -142,10 +165,9 @@ All three share one stylesheet and one HTML model, so a book looks consistent ac
 
 ## Collections
 
-A *collection of books* is a parent directory of book folders that share a theme and
-cover style — the same way a podcast network groups shows. Group them under one repo
-(see the companion content repo, the book-world analogue of `noted`) and build each
-with `bookkit build -b <book-dir>`.
+A *collection of books* is a parent directory of book folders, scaffolded with
+`bookkit series new` and bound together by a `series.yaml` (see [Correlated books](#correlated-books-series)
+above). Build each book with `bookkit build -b <book-dir>`.
 
 ---
 

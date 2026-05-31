@@ -41,6 +41,30 @@ def test_new_scaffolds_book(tmp_path: Path) -> None:
     assert [b.chapter for b in bible.beats] == [1, 2, 3]
 
 
+def test_series_new_scaffolds_collection(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app, ["series", "new", "My Cycle", "-n", "2", "-c", "1", "-d", str(tmp_path)]
+    )
+    assert result.exit_code == 0, result.stdout
+    coll = tmp_path / "my-cycle"
+    assert (coll / "series.yaml").exists()
+    for b in ("book-01", "book-02"):
+        assert (coll / b / "book.yaml").exists()
+        assert (coll / b / "bible.yaml").exists()
+
+    import yaml as _yaml
+
+    from bookkit.config import BookConfig
+
+    book2 = BookConfig.model_validate(_yaml.safe_load((coll / "book-02" / "book.yaml").read_text()))
+    assert book2.series == "../series.yaml"
+
+    from bookkit.series import load_series
+
+    series = load_series(coll / "series.yaml")
+    assert series.book("book-02").opens_from == "book-01"
+
+
 def test_build_missing_config_errors(tmp_path: Path) -> None:
     result = runner.invoke(app, ["build", "-b", str(tmp_path), "-o", "json"])
     assert result.exit_code == 3  # NOT_FOUND
