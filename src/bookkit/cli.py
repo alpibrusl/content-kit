@@ -226,6 +226,11 @@ def cmd_audiobook(
     max_chars: int = typer.Option(
         600, "--max-chars", help="Maximum characters per narration line (TTS chunk size)."
     ),
+    cast: bool = typer.Option(
+        False,
+        "--cast",
+        help="Full-cast reading: attribute dialogue to bible characters (else single narrator).",
+    ),
     force: bool = typer.Option(
         False, "--force", help="Overwrite existing script.json/episode.yaml files."
     ),
@@ -271,6 +276,7 @@ def cmd_audiobook(
         voice_id=voice,
         narrator=narrator,
         max_chars=max_chars,
+        cast=cast,
     )
     target = (dest or (book_dir / f"{slugify(config.title)}-audiobook")).resolve()
 
@@ -297,6 +303,8 @@ def cmd_audiobook(
         "characters": len(plan.voices),
         "chars": plan.char_count,
         "narrator_backend": backend,
+        "cast": cast,
+        "cast_lines": plan.cast_line_count,
         "files_written": len(written),
     }
     if output == OutputFormat.text:
@@ -304,6 +312,11 @@ def cmd_audiobook(
         print(f"  episodes:   {data['episodes']} (one per chapter)")
         print(f"  lines:      {data['lines']}")
         print(f"  characters: {data['characters']} (cast from bible.yaml + narrator)")
+        if cast:
+            print(
+                f"  cast lines: {data['cast_lines']} dialogue line(s) "
+                "attributed to characters (rest narrated)"
+            )
         print(f"  chars:      {data['chars']} (TTS billing estimate for paid backends)")
         print(f"  files:      {data['files_written']} written")
         if written:
@@ -311,6 +324,88 @@ def cmd_audiobook(
                 f"  next:       podcastkit generate -e {target.name}/chapter_01 "
                 f"&& podcastkit assemble -e {target.name}/chapter_01"
             )
+    else:
+        emit(success_envelope(cmd, data, start_time=t0), output)
+
+
+# ---------------------------------------------------------------------------
+# Command: storyboard (visual tier — comic / video script)
+# ---------------------------------------------------------------------------
+
+
+@app.command("storyboard")
+def cmd_storyboard(
+    book_dir: Path = typer.Option(
+        Path("."), "--book-dir", "-b", help="Book directory containing book.yaml."
+    ),
+    dest: Path = typer.Option(
+        None,
+        "--dest",
+        "-d",
+        help="Where to write the storyboard (default: <book-dir>/<slug>-storyboard).",
+    ),
+    max_panel_chars: int = typer.Option(
+        320, "--max-panel-chars", help="Maximum characters of prose per panel."
+    ),
+    force: bool = typer.Option(False, "--force", help="Overwrite existing storyboard.json files."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show the plan (chapters, panels) without writing."
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", "-o", help="Output format (text|json)."
+    ),
+) -> None:
+    """Generate a storyboard (panel/shot script) from a book — the visual tier.
+
+    Emits one storyboard.json per chapter: ordered panels with a scene
+    description, attributed dialogue, and the characters present (with art notes
+    pulled from bible.yaml). A comic or video tool renders the panels; bookkit
+    just produces the canonical script — the same source the EPUB, PDF, and
+    audiobook come from.
+    """
+    from .storyboard import plan_storyboard, slugify, write_storyboard
+
+    t0 = time.time()
+    cmd = "storyboard"
+    book_dir = book_dir.resolve()
+    config = _load_config(book_dir, cmd, output)
+
+    missing = [c.file for c in config.chapters if not (book_dir / c.file).exists()]
+    if missing:
+        _die(
+            cmd,
+            output,
+            code=ExitCode.PRECONDITION_FAILED,
+            message=f"{len(missing)} chapter file(s) missing",
+            hints=[f"missing: {m}" for m in missing],
+        )
+
+    bible_file = book_dir / "bible.yaml"
+    bible = load_bible(bible_file) if bible_file.exists() else None
+
+    plan = plan_storyboard(config, book_dir, bible=bible, max_panel_chars=max_panel_chars)
+    target = (dest or (book_dir / f"{slugify(config.title)}-storyboard")).resolve()
+
+    if dry_run:
+        planned = [
+            {"chapter": c.name, "title": c.title, "panels": len(c.panels)} for c in plan.chapters
+        ]
+        envelope = success_envelope(cmd, {}, start_time=t0, dry_run=True, planned_actions=planned)
+        emit(envelope, output)
+        raise typer.Exit(code=ExitCode.DRY_RUN)
+
+    written = write_storyboard(plan, target, force=force)
+    data = {
+        "storyboard": str(target),
+        "chapters": len(plan.chapters),
+        "panels": plan.panel_count,
+        "files_written": len(written),
+    }
+    if output == OutputFormat.text:
+        print(f"Wrote storyboard to {target}")
+        print(f"  chapters: {data['chapters']}")
+        print(f"  panels:   {data['panels']}")
+        print(f"  files:    {data['files_written']} written")
     else:
         emit(success_envelope(cmd, data, start_time=t0), output)
 
@@ -798,6 +893,7 @@ def cmd_introspect(
                     {"name": "--voice", "type": "string", "default": "bm_george"},
                     {"name": "--narrator", "type": "string", "default": "NARRATOR"},
                     {"name": "--max-chars", "type": "integer", "default": 600},
+                    {"name": "--cast", "type": "bool", "default": False},
                     {"name": "--force", "type": "bool", "default": False},
                     {"name": "--dry-run", "type": "bool", "default": False},
                     {
@@ -811,6 +907,37 @@ def cmd_introspect(
                     {
                         "description": "Emit a podcastkit project for the book",
                         "invocation": "bookkit audiobook -b . --backend kokoro --voice bm_george",
+                    },
+                    {
+                        "description": "Full-cast reading (attribute dialogue to characters)",
+                        "invocation": "bookkit audiobook -b . --cast --backend openai",
+                    },
+                ],
+            },
+            {
+                "name": "storyboard",
+                "description": "Generate a storyboard (panel/shot script) from a book — the "
+                "visual tier. One storyboard.json per chapter: panels with scene, attributed "
+                "dialogue, characters present, and art notes from bible.yaml. Rendered by a "
+                "comic or video tool.",
+                "idempotent": True,
+                "options": [
+                    {"name": "--book-dir", "short": "-b", "type": "path", "default": "."},
+                    {"name": "--dest", "short": "-d", "type": "path", "default": None},
+                    {"name": "--max-panel-chars", "type": "integer", "default": 320},
+                    {"name": "--force", "type": "bool", "default": False},
+                    {"name": "--dry-run", "type": "bool", "default": False},
+                    {
+                        "name": "--output",
+                        "short": "-o",
+                        "type": "enum[text|json]",
+                        "default": "text",
+                    },
+                ],
+                "examples": [
+                    {
+                        "description": "Emit a storyboard for the book",
+                        "invocation": "bookkit storyboard -b .",
                     }
                 ],
             },

@@ -190,6 +190,7 @@ timeline).
 bookkit audiobook -b .                       # → ./<slug>-audiobook/chapter_NN/
 bookkit audiobook -b . --dry-run             # show episodes, lines, char counts
 bookkit audiobook -b . --backend openai --voice nova   # cast the narrator
+bookkit audiobook -b . --cast                # full-cast: attribute dialogue to characters
 ```
 
 The two tools stay **decoupled** — bookkit never imports podcastkit; it just
@@ -210,10 +211,45 @@ reading is a matter of assigning voices — not re-deriving who the characters a
 The character a reader meets, an EPUB renders, and a narrator voices is one
 definition, in one place.
 
+**Full-cast readings.** `--cast` attributes quoted (`"..."`) and dash-led
+(`—...`, Spanish/French) dialogue to the bible character an attribution cue names
+(`said X` / `—dijo X`), giving each their own voice. Attribution is deliberately
+conservative — when no cue clearly names a speaker, the line stays with the
+narrator, because a wrong voice is more jarring than a narrated one. (First-person
+narration therefore stays mostly narrated, which is correct.)
+
 > **Note on cost & language.** Local backends (`kokoro`, `chatterbox`) are free
 > and English-centric; `openai` and `elevenlabs` are paid per character and
 > handle other languages (e.g. Spanish) better. `audiobook` reports the total
 > character count so you can estimate paid-TTS spend before rendering.
+
+---
+
+## Storyboard (the visual tier)
+
+The same canon also drives **visuals**. `bookkit storyboard` turns a book into a
+panel/shot script — one `storyboard.json` per chapter — that a comic or video
+tool renders:
+
+```bash
+bookkit storyboard -b .            # → ./<slug>-storyboard/chapter_NN/storyboard.json
+bookkit storyboard -b . --dry-run  # show chapters and panel counts
+```
+
+Each panel carries a **scene** description, the **dialogue** spoken in it
+(attributed with the same engine as `--cast`), the **characters present**, and
+**art notes** pulled from `bible.yaml` — so a character looks the same in every
+panel they appear in, the same way the bible keeps them consistent in prose and
+audio. bookkit produces the script; rendering pixels is a separate tier, exactly
+as rendering audio is podcastkit's job — one canonical source, many media.
+
+## Orchestrating the pipeline
+
+The tiers compose. `scripts/render-media.sh <book-dir> [--cast]` runs the whole
+chain (audiobook → podcastkit render, plus the storyboard), and the
+`skills/book-to-media` agent skill lets Claude drive it from a plain request
+("make a full-cast audiobook of book-03"). See [docs/PRODUCT.md](docs/PRODUCT.md)
+for why the product surface is a skill/MCP rather than a web app — for now.
 
 ---
 

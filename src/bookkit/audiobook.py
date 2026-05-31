@@ -31,6 +31,7 @@ from pathlib import Path
 
 import yaml
 
+from ._dialogue import attribute
 from ._manuscript import load_chapter, split_title
 from .bible import BibleConfig
 from .config import BookConfig
@@ -189,6 +190,13 @@ class AudiobookPlan:
     def char_count(self) -> int:
         return sum(ep.char_count for ep in self.episodes)
 
+    @property
+    def cast_line_count(self) -> int:
+        """Lines attributed to a character other than the narrator."""
+        return sum(
+            1 for ep in self.episodes for line in ep.script if line.character != self.narrator
+        )
+
 
 # --- Book → plan -------------------------------------------------------------
 
@@ -196,6 +204,14 @@ class AudiobookPlan:
 def slugify(text: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
     return slug or "audiobook"
+
+
+def _line_prefix(character: str) -> str:
+    """A short, stable id prefix for a character's script lines."""
+    name = character.strip().upper()
+    if name == "NARRATOR":
+        return "narr"
+    return slugify(name).replace("-", "")[:4] or "narr"
 
 
 def _voice_cast(
@@ -233,17 +249,22 @@ def plan_audiobook(
     narrator: str = "NARRATOR",
     max_chars: int = 600,
     project_name: str | None = None,
+    cast: bool = False,
 ) -> AudiobookPlan:
     """Turn a loaded book into an :class:`AudiobookPlan` (no files written).
 
     One episode is produced per chapter. Chapter prose is flattened to speech,
-    chunked into TTS-sized narration lines, and timed with a slightly longer gap
-    before each chapter's first line. Pure and deterministic, so it is unit-
-    testable without touching TTS or the filesystem beyond reading chapters.
+    chunked into TTS-sized lines, and timed with a slightly longer gap before
+    each chapter's first line. With ``cast=False`` every line is the narrator
+    (a classic single-reader audiobook). With ``cast=True`` quoted/dash-led
+    dialogue is attributed to bible characters when an attribution cue names one,
+    falling back to the narrator otherwise. Pure and deterministic, so it is
+    unit-testable without touching TTS or the filesystem beyond reading chapters.
     """
     narrator = narrator.strip().upper() or "NARRATOR"
-    prefix = "narr" if narrator == "NARRATOR" else slugify(narrator).replace("-", "")[:4] or "narr"
     voices = _voice_cast(backend, voice_id, narrator, bible)
+    prefixes = {name: _line_prefix(name) for name in voices}
+    prefixes.setdefault(narrator, _line_prefix(narrator))
 
     episodes: list[Episode] = []
     for index, entry in enumerate(config.chapters, start=1):
@@ -251,13 +272,28 @@ def plan_audiobook(
         raw = (book_dir / entry.file).read_text(encoding="utf-8")
         _, body = split_title(raw)
         speech = markdown_to_speech(body)
-        chunks = chunk_text(speech, max_chars)
+
+        # (speaker, text) segments: one narrator segment per paragraph in the
+        # single-voice case, or attributed dialogue when casting.
+        if cast:
+            segments = attribute(speech, bible, narrator)
+        else:
+            segments = [(narrator, para) for para in speech.split("\n\n") if para.strip()]
+
+        # Chunk each segment to TTS size while preserving its speaker.
+        spoken: list[tuple[str, str]] = []
+        for speaker, seg_text in segments:
+            for piece in chunk_text(seg_text, max_chars):
+                spoken.append((speaker, piece))
 
         script: list[Line] = []
         timeline: list[dict] = []
-        for n, chunk in enumerate(chunks, start=1):
-            line_id = f"{prefix}_{index:02d}_{n:04d}"
-            script.append(Line(id=line_id, character=narrator, text=chunk))
+        counters: dict[str, int] = {}
+        for n, (speaker, piece) in enumerate(spoken, start=1):
+            prefix = prefixes.get(speaker) or _line_prefix(speaker)
+            counters[prefix] = counters.get(prefix, 0) + 1
+            line_id = f"{prefix}_{index:02d}_{counters[prefix]:04d}"
+            script.append(Line(id=line_id, character=speaker, text=piece))
             pre = _CHAPTER_GAP if n == 1 else _PRE_SILENCE
             timeline.append({"id": line_id, "pre_silence": pre})
 

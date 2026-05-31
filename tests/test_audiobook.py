@@ -165,6 +165,27 @@ def test_plan_char_count_sums_text(tmp_path):
     assert plan.char_count == len("abcde fghij.")
 
 
+def test_plan_single_voice_is_all_narrator(tmp_path):
+    config = _make_book(tmp_path, [("chapters/01.md", '"Run," said Mara. She bolted away.')])
+    bible = BibleConfig(characters=[Character(name="Mara")])
+    plan = plan_audiobook(config, tmp_path, bible=bible)  # cast defaults to False
+    assert all(line.character == "NARRATOR" for line in plan.episodes[0].script)
+    assert plan.cast_line_count == 0
+
+
+def test_plan_cast_attributes_dialogue(tmp_path):
+    config = _make_book(tmp_path, [("chapters/01.md", '"Run," said Mara. She bolted away.')])
+    bible = BibleConfig(characters=[Character(name="Mara", voice="Urgent.")])
+    plan = plan_audiobook(config, tmp_path, bible=bible, cast=True)
+    chars = [line.character for line in plan.episodes[0].script]
+    assert "MARA" in chars  # dialogue attributed
+    assert "NARRATOR" in chars  # narration retained
+    assert plan.cast_line_count >= 1
+    # Attributed line ids carry the character's prefix, narration stays "narr".
+    mara_lines = [ln for ln in plan.episodes[0].script if ln.character == "MARA"]
+    assert all(ln.id.startswith("mara_01_") for ln in mara_lines)
+
+
 # --- write_project -----------------------------------------------------------
 
 
