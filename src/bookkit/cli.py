@@ -7,6 +7,12 @@ from pathlib import Path
 import typer
 import yaml
 
+from ._context import (
+    assemble_recap,
+    bible_to_prompt_text,
+    find_chapter_file,
+    prev_chapter_text,
+)
 from ._errors import BookKitError
 from ._exit_codes import ExitCode
 from ._extract import split_prose_and_yaml
@@ -16,10 +22,10 @@ from ._output import (
     error_envelope,
     success_envelope,
 )
-from .bible import BibleConfig, dump_bible
+from .bible import Beat, BibleConfig, StateChange, dump_bible, load_bible
 from .bind import bind
 from .config import BookConfig
-from .prompts import build_chapter_prompts, build_outline_prompts
+from .prompts import build_chapter_prompts, build_outline_prompts, build_recap_prompts
 from .renderers import VALID_FORMATS
 from .scaffold import scaffold_book
 from .writers import default_writer_name, get_writer
@@ -257,6 +263,18 @@ def cmd_write_chapter(
     summary: str = typer.Option("", "--summary", "-s", help="Optional summary for this chapter."),
     title: str = typer.Option("", "--title", "-t", help="Optional chapter title."),
     words: int = typer.Option(2000, "--words", help="Target word count."),
+    book_dir: Path = typer.Option(
+        Path("."), "--book-dir", "-b", help="Book dir (for bible.yaml, recaps/, chapters/)."
+    ),
+    bible_path: Path = typer.Option(
+        None, "--bible", help="Path to bible.yaml (default: <book-dir>/bible.yaml)."
+    ),
+    use_recap: bool = typer.Option(
+        True, "--recap/--no-recap", help="Include a recap of earlier chapters as context."
+    ),
+    prev_full: bool = typer.Option(
+        True, "--prev-full/--no-prev-full", help="Include the previous chapter's full text."
+    ),
     writer: str | None = typer.Option(
         None,
         "--writer",
@@ -268,10 +286,10 @@ def cmd_write_chapter(
         None, "--model", "-m", help="Override the model name (else $BOOKKIT_MODEL)."
     ),
     out: Path = typer.Option(
-        None, "--output", "-o", help="Output path (default: chapters/NN-*.md)."
+        None, "--output", "-o", help="Output path (default: <book-dir>/chapters/NN-*.md)."
     ),
 ) -> None:
-    """Generate a chapter's prose from an outline."""
+    """Generate a chapter's prose from an outline, with canon + story-so-far context."""
     cmd = "write chapter"
     writer_name = writer or default_writer_name()
     if not outline.exists():
@@ -279,17 +297,120 @@ def cmd_write_chapter(
             cmd, OutputFormat.text, code=ExitCode.NOT_FOUND, message=f"outline not found: {outline}"
         )
     outline_text = outline.read_text(encoding="utf-8")
+    book_dir = book_dir.resolve()
 
-    system, user = build_chapter_prompts(outline_text, chapter, summary, title, words)
+    # Continuity layers (all optional; degrade gracefully if absent).
+    canon = ""
+    beat_summary = summary
+    bible_file = bible_path or (book_dir / "bible.yaml")
+    sources_used = []
+    if bible_file.exists():
+        bible = load_bible(bible_file)
+        canon = bible_to_prompt_text(bible, upto_chapter=chapter)
+        beat = bible.beat_for(chapter)
+        if beat and not summary:
+            beat_summary = beat.summary
+        if canon:
+            sources_used.append("bible")
+    recap = assemble_recap(book_dir, chapter) if use_recap else ""
+    if recap:
+        sources_used.append("recap")
+    prev = prev_chapter_text(book_dir, chapter) if prev_full else ""
+    if prev:
+        sources_used.append("prev-chapter")
+
+    system, user = build_chapter_prompts(
+        outline_text,
+        chapter,
+        beat_summary,
+        title,
+        words,
+        canon=canon,
+        recap=recap,
+        prev_chapter=prev,
+    )
     try:
         text = get_writer(writer_name, model).complete(system, user)
     except (RuntimeError, ValueError) as exc:
         _die(cmd, OutputFormat.text, code=ExitCode.UPSTREAM_ERROR, message=str(exc))
 
-    dest = out or Path("chapters") / f"{chapter:02d}-chapter.md"
+    dest = out or book_dir / "chapters" / f"{chapter:02d}-chapter.md"
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(text.strip() + "\n", encoding="utf-8")
-    print(f"Wrote chapter {chapter} to {dest} ({len(text)} chars)")
+    context_note = ", ".join(sources_used) if sources_used else "no continuity context found"
+    print(f"Wrote chapter {chapter} to {dest} ({len(text)} chars) — context: {context_note}")
+
+
+@app.command("recap")
+def cmd_recap(
+    chapter: int = typer.Option(..., "--chapter", "-c", help="Chapter number to recap."),
+    book_dir: Path = typer.Option(
+        Path("."), "--book-dir", "-b", help="Book dir (for chapters/, recaps/, bible.yaml)."
+    ),
+    apply: bool = typer.Option(
+        False, "--apply", help="Apply proposed state changes to bible.yaml."
+    ),
+    writer: str | None = typer.Option(
+        None, "--writer", "-w", help="LLM backend. Default: $BOOKKIT_WRITER, else ollama."
+    ),
+    model: str | None = typer.Option(
+        None, "--model", "-m", help="Override the model name (else $BOOKKIT_MODEL)."
+    ),
+) -> None:
+    """Summarize a chapter into recaps/NN.md and propose canonical state changes."""
+    cmd = "recap"
+    writer_name = writer or default_writer_name()
+    book_dir = book_dir.resolve()
+
+    chapter_file = find_chapter_file(book_dir, chapter)
+    if not chapter_file:
+        _die(
+            cmd,
+            OutputFormat.text,
+            code=ExitCode.NOT_FOUND,
+            message=f"chapter {chapter} source not found under {book_dir}",
+            hint="Write the chapter first (bookkit write chapter -c N).",
+        )
+    chapter_text = chapter_file.read_text(encoding="utf-8")
+
+    system, user = build_recap_prompts(chapter, chapter_text)
+    try:
+        response = get_writer(writer_name, model).complete(system, user)
+    except (RuntimeError, ValueError) as exc:
+        _die(cmd, OutputFormat.text, code=ExitCode.UPSTREAM_ERROR, message=str(exc))
+
+    prose, yaml_block = split_prose_and_yaml(response)
+    recaps_dir = book_dir / "recaps"
+    recaps_dir.mkdir(parents=True, exist_ok=True)
+    recap_path = recaps_dir / f"{chapter:02d}.md"
+    recap_path.write_text(prose + "\n", encoding="utf-8")
+    print(f"Wrote recap to {recap_path} ({len(prose)} chars)")
+
+    # Parse and report (optionally apply) proposed canonical state changes.
+    changes: list[StateChange] = []
+    if yaml_block:
+        try:
+            parsed = yaml.safe_load(yaml_block) or {}
+            beat = Beat.model_validate({"chapter": chapter, **parsed})
+            changes = beat.state_changes
+        except Exception:
+            changes = []
+    if not changes:
+        print("No canonical state changes proposed.")
+        return
+    print(f"Proposed state changes for chapter {chapter}:")
+    for c in changes:
+        print(f"  - {c.character + ': ' if c.character else ''}{c.set or c.note}")
+    bible_file = book_dir / "bible.yaml"
+    if apply and bible_file.exists():
+        bible = load_bible(bible_file)
+        bible.apply_state_changes(chapter, changes)
+        bible_file.write_text(dump_bible(bible), encoding="utf-8")
+        print(f"Applied {len(changes)} change(s) to {bible_file}")
+    elif apply:
+        print(f"--apply set but {bible_file} not found; nothing applied.")
+    else:
+        print("Re-run with --apply to write these into bible.yaml.")
 
 
 # ---------------------------------------------------------------------------
@@ -377,7 +498,8 @@ def cmd_introspect(
             },
             {
                 "name": "write chapter",
-                "description": "Generate a chapter's prose from an outline using an LLM.",
+                "description": "Generate a chapter's prose from an outline, with canon "
+                "+ story-so-far continuity context, using an LLM.",
                 "idempotent": False,
                 "options": [
                     {"name": "--outline", "type": "path", "required": True},
@@ -385,14 +507,36 @@ def cmd_introspect(
                     {"name": "--summary", "short": "-s", "type": "string", "default": ""},
                     {"name": "--title", "short": "-t", "type": "string", "default": ""},
                     {"name": "--words", "type": "integer", "default": 2000},
+                    {"name": "--book-dir", "short": "-b", "type": "path", "default": "."},
+                    {"name": "--bible", "type": "path", "default": "<book-dir>/bible.yaml"},
+                    {"name": "--recap/--no-recap", "type": "bool", "default": True},
+                    {"name": "--prev-full/--no-prev-full", "type": "bool", "default": True},
                     {
                         "name": "--writer",
                         "short": "-w",
-                        "type": "enum[claude|ollama|openai]",
-                        "default": "ollama",
+                        "type": "enum[claude|ollama|openai|openai_compat]",
+                        "default": "$BOOKKIT_WRITER|ollama",
                     },
                     {"name": "--model", "short": "-m", "type": "string", "default": None},
                     {"name": "--output", "short": "-o", "type": "path", "default": None},
+                ],
+            },
+            {
+                "name": "recap",
+                "description": "Summarize a chapter into recaps/NN.md and propose "
+                "canonical state changes for the bible.",
+                "idempotent": True,
+                "options": [
+                    {"name": "--chapter", "short": "-c", "type": "integer", "required": True},
+                    {"name": "--book-dir", "short": "-b", "type": "path", "default": "."},
+                    {"name": "--apply", "type": "bool", "default": False},
+                    {
+                        "name": "--writer",
+                        "short": "-w",
+                        "type": "enum[claude|ollama|openai|openai_compat]",
+                        "default": "$BOOKKIT_WRITER|ollama",
+                    },
+                    {"name": "--model", "short": "-m", "type": "string", "default": None},
                 ],
             },
         ],

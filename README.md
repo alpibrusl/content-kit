@@ -48,11 +48,16 @@ WeasyPrint needs system libraries (Pango, cairo) for PDF output — see its inst
 # 1. Scaffold a book
 bookkit new "The Compliance Engine" -n 8
 
-# 2. (optional) Draft from a concept with an LLM
-bookkit write outline "A field guide to corporate AI governance" -n 8 -w claude
-bookkit write chapter --outline outline.md --chapter 1 -w claude
+# 2. (optional) Draft from a concept with an LLM — also writes a bible.yaml (canon)
+bookkit write outline "A field guide to corporate AI governance" -n 8
 
-# 3. Write your chapters in chapters/NN-*.md (plain Markdown)
+# 3. Write chapters. Each chapter is generated WITH continuity context:
+#    the bible + this chapter's beat + a recap of earlier chapters.
+bookkit write chapter --outline outline.md --chapter 1
+bookkit recap --chapter 1 --apply        # summarize ch.1 → recaps/01.md, update canon
+bookkit write chapter --outline outline.md --chapter 2   # ch.2 "knows" what happened in ch.1
+bookkit recap --chapter 2 --apply
+# …repeat. Or hand-write chapters in chapters/NN-*.md (plain Markdown).
 
 # 4. Build
 bookkit build -f epub
@@ -71,8 +76,20 @@ For plot/character coherence across chapters — and across correlated books in 
 voice and mutable status), the world, the timeline, and per-chapter plot beats. `bookkit new`
 scaffolds a starter `bible.yaml`, and `bookkit write outline` emits a filled one alongside the
 prose outline. The canon is plain, auditable data — continuity lives in source control, not in
-a model's memory. Full design (running recaps, series bibles, and a `check continuity` guard):
-[`docs/continuity.md`](docs/continuity.md).
+a model's memory.
+
+How coherence is actually enforced:
+
+- **`write chapter`** feeds the model three context layers before it writes: the **canon**
+  (the bible, sliced to characters introduced by this chapter), this chapter's **beat**, and a
+  **recap** of earlier chapters (plus the previous chapter's full text for voice carryover).
+  The system prompt forbids contradicting the canon or violating a character's `status`.
+- **`recap --chapter N [--apply]`** summarizes a finished chapter into `recaps/NN.md` and
+  proposes canonical state changes (e.g. a character departs); `--apply` writes them back into
+  `bible.yaml`, so the *next* chapter is generated against the updated state.
+
+Still to come (designed, not yet built): **series bibles** for correlated books and a
+`check continuity` guard. Full design: [`docs/continuity.md`](docs/continuity.md).
 
 ## LLM-agnostic
 

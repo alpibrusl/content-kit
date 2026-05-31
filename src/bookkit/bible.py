@@ -108,6 +108,29 @@ class BibleConfig(BaseModel):
                 return b
         return None
 
+    def apply_state_changes(self, chapter: int, changes: list[StateChange]) -> None:
+        """Record canonical changes on a chapter's beat and propagate to characters.
+
+        The beat (created if missing) gets the changes appended; any ``set`` keys
+        on a named, known character also update that character's live canon (e.g.
+        ``status``) so later chapters see the new state.
+        """
+        beat = self.beat_for(chapter)
+        if beat is None:
+            beat = Beat(chapter=chapter)
+            self.beats.append(beat)
+            self.beats.sort(key=lambda b: b.chapter)
+        beat.state_changes.extend(changes)
+        for change in changes:
+            if not change.character or not change.set:
+                continue
+            character = self.character(change.character)
+            if character is None:
+                continue
+            for key, value in change.set.items():
+                if hasattr(character, key):
+                    setattr(character, key, value)
+
 
 def load_bible(path: Any) -> BibleConfig:
     """Load and validate a bible.yaml file into a BibleConfig."""

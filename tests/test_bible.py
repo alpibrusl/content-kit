@@ -73,6 +73,17 @@ def test_empty_bible_is_valid() -> None:
     assert bible.beats == []
 
 
+def test_apply_state_changes_updates_beat_and_character() -> None:
+    bible = BibleConfig.model_validate(yaml.safe_load(SAMPLE))
+    from bookkit.bible import StateChange
+
+    bible.apply_state_changes(3, [StateChange(character="MARA", set={"status": "fugitive"})])
+    assert bible.character("MARA").status == "fugitive"  # propagated to live canon
+    beat3 = bible.beat_for(3)
+    assert beat3 is not None  # beat created on the fly
+    assert beat3.state_changes[0].set == {"status": "fugitive"}
+
+
 def test_dump_roundtrip_preserves_with_alias(tmp_path: Path) -> None:
     bible = BibleConfig(
         title="T",
