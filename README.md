@@ -176,6 +176,47 @@ All three share one stylesheet and one HTML model, so a book looks consistent ac
 
 ---
 
+## Audiobook (bridge to podcastkit)
+
+The same source that renders to EPUB and PDF can render to **audio**, by handing
+off to [podcastkit](https://github.com/alpibrusl/podcastkit) — the sibling tool
+that turns a script into an MP3 via TTS + ffmpeg. `bookkit audiobook` reads a
+book's Markdown chapters and emits a ready-to-render podcastkit project: one
+episode per chapter, each with a `script.json` (the narration, chunked into
+TTS-sized lines on sentence boundaries) and an `episode.yaml` (the voice cast +
+timeline).
+
+```bash
+bookkit audiobook -b .                       # → ./<slug>-audiobook/chapter_NN/
+bookkit audiobook -b . --dry-run             # show episodes, lines, char counts
+bookkit audiobook -b . --backend openai --voice nova   # cast the narrator
+```
+
+The two tools stay **decoupled** — bookkit never imports podcastkit; it just
+writes files podcastkit knows how to read. Render them with podcastkit:
+
+```bash
+cd <slug>-audiobook/chapter_01
+podcastkit generate      # script.json → voices/*.mp3 (TTS)
+podcastkit assemble      # → chapter_01.mp3
+```
+
+**The bible is the voice cast.** When a `bible.yaml` is present, every character
+in the canon becomes an entry in the episode's `voices` map, with its canonical
+`voice` description carried across as a casting note. v1 narrates everything as a
+single `NARRATOR` voice (a classic single-reader audiobook); the rest of the cast
+is wired in with placeholder voice ids, so turning a novel into a *full-cast*
+reading is a matter of assigning voices — not re-deriving who the characters are.
+The character a reader meets, an EPUB renders, and a narrator voices is one
+definition, in one place.
+
+> **Note on cost & language.** Local backends (`kokoro`, `chatterbox`) are free
+> and English-centric; `openai` and `elevenlabs` are paid per character and
+> handle other languages (e.g. Spanish) better. `audiobook` reports the total
+> character count so you can estimate paid-TTS spend before rendering.
+
+---
+
 ## Collections
 
 A *collection of books* is a parent directory of book folders, scaffolded with
