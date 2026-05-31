@@ -153,6 +153,36 @@ def back_matter_sections(config: BookConfig) -> list[str]:
     return out
 
 
+def iter_front_matter(config: BookConfig) -> list[tuple[str, str, str]]:
+    """Front matter as discrete ``(slug, title, html)`` documents.
+
+    For renderers that paginate into separate files (EPUB). The ``toc`` section
+    is omitted on purpose: those renderers build their own navigation, so a
+    second hand-rolled table of contents would only duplicate it.
+    """
+    builders = {
+        "title_page": ("title-page", config.title or "Title", lambda: _title_page(config)),
+        "copyright": ("copyright", "Copyright", lambda: _copyright_page(config)),
+    }
+    docs = []
+    for name in config.front_matter:
+        if name in builders:
+            slug, title, build = builders[name]
+            docs.append((slug, title, build()))
+    return docs
+
+
+def iter_back_matter(config: BookConfig) -> list[tuple[str, str, str]]:
+    """Back matter as discrete ``(slug, title, html)`` documents (EPUB)."""
+    docs = []
+    for name in config.back_matter:
+        if name == "about_author":
+            html = _about_author(config)
+            if html:
+                docs.append(("about-author", "About the Author", html))
+    return docs
+
+
 def resolve_css(config: BookConfig, book_dir: Path) -> str:
     """Return the stylesheet text — a custom file if set, else the built-in default."""
     if config.theme.stylesheet:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .._html import chapter_section, resolve_css
+from .._html import chapter_section, iter_back_matter, iter_front_matter, resolve_css
 from .._manuscript import Chapter
 from ..config import BookConfig
 from .base import Renderer
@@ -54,17 +54,28 @@ class EpubRenderer(Renderer):
         )
         book.add_item(css)
 
-        spine: list = ["nav"]
-        toc: list = []
-        for chapter in chapters:
-            item = epub.EpubHtml(
-                title=chapter.title,
-                file_name=f"{chapter.id}.xhtml",
-                lang=config.language,
-            )
-            item.content = chapter_section(chapter)
+        def make_item(slug: str, title: str, content: str):
+            item = epub.EpubHtml(title=title, file_name=f"{slug}.xhtml", lang=config.language)
+            item.content = content
             item.add_item(css)
             book.add_item(item)
+            return item
+
+        # Front matter (title page, copyright) precedes the nav in reading order;
+        # it is intentionally kept out of the TOC, which lists the chapters.
+        spine: list = []
+        for slug, title, content in iter_front_matter(config):
+            spine.append(make_item(slug, title, content))
+        spine.append("nav")
+
+        toc: list = []
+        for chapter in chapters:
+            item = make_item(chapter.id, chapter.title, chapter_section(chapter))
+            spine.append(item)
+            toc.append(item)
+
+        for slug, title, content in iter_back_matter(config):
+            item = make_item(slug, title, content)
             spine.append(item)
             toc.append(item)
 
