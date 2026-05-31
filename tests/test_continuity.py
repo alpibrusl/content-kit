@@ -33,6 +33,23 @@ def test_revenant_in_beats() -> None:
     assert revenants[0].severity == "error"
 
 
+def test_mourned_character_not_flagged_as_revenant() -> None:
+    bible = BibleConfig.model_validate(
+        {
+            "characters": [{"name": "THEO", "first_appears": 1, "mourned": True}],
+            "beats": [
+                {
+                    "chapter": 1,
+                    "summary": "Theo skates.",
+                    "state_changes": [{"character": "THEO", "set": {"status": "dead"}}],
+                },
+                {"chapter": 3, "summary": "The town mourns THEO at the funeral."},
+            ],
+        }
+    )
+    assert "revenant" not in _kinds(check_book(bible))
+
+
 def test_revenant_cleared_by_revival() -> None:
     bible = BibleConfig.model_validate(
         {

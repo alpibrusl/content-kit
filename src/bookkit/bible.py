@@ -59,6 +59,7 @@ class Character(BaseModel):
     relationships: list[Relationship] = []
     arc: str = ""
     status: str = "alive"  # mutable canon: alive | dead | departed | active | unknown | ...
+    mourned: bool = False  # if dead/departed, posthumous mentions (grief, memory) are expected
     first_appears: int | None = None
 
 

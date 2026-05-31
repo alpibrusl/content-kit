@@ -130,6 +130,10 @@ def check_book(
     flagged: set[tuple[str, int]] = set()
     for name, (since, status) in _inactive_chapters(bible).items():
         char = bible.character(name)
+        # A mourned character is expected to be named after death (grief, memory),
+        # so their later mentions are not revenant bugs.
+        if char and char.mourned:
+            continue
         canonical = names.get(name.lower(), name)
         aliases = [canonical, *(char.aka if char else [])]
         for beat in bible.beats:
