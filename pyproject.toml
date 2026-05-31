@@ -1,0 +1,77 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bookkit"
+version = "0.1.0"
+description = "CLI for producing books as code — Markdown chapters rendered to EPUB and PDF"
+requires-python = ">=3.10"
+dependencies = [
+    "typer>=0.12",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "requests>=2.31",
+    "markdown>=3.5",
+]
+
+[project.optional-dependencies]
+epub = ["ebooklib>=0.18"]
+pdf = ["weasyprint>=60"]
+claude = ["anthropic>=0.25"]
+openai = ["openai>=1.30"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.4",
+    "pre-commit>=3.7",
+]
+
+[project.scripts]
+bookkit = "bookkit.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bookkit"]
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    "B008",   # typer.Option() in defaults — intended pattern for typer CLIs
+    "SIM108", # ternary collapse — sometimes less readable
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]   # assert is fine in tests
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"
+
+[tool.coverage.run]
+source = ["src/bookkit"]
+omit = [
+    "*/renderers/epub.py",
+    "*/renderers/pdf.py",
+    "*/writers/claude.py",
+    "*/writers/ollama.py",
+    "*/writers/openai_writer.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
