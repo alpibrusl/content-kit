@@ -334,14 +334,50 @@ if its inputs are absent (a book with no `bible.yaml` behaves like today).
 
 ---
 
-## 9. Open questions for review
+## 9. Resolved decisions
 
-1. **Bible format:** structured `bible.yaml` (proposed) vs. a looser `bible.md`
-   like `noted`. YAML buys us the automated checker (§D); Markdown is friendlier to
-   write by hand. Proposal: YAML canon + the prose outline alongside it.
-2. **Recaps in git:** commit them (proposed, for reproducibility) or gitignore as
-   build artifacts?
-3. **State model depth:** is `status` + free-text `state_changes` enough, or do we
-   want typed state (locations, possessions, knowledge) for richer checks?
-4. **Default writer:** continuity prompts are long; is `ollama`/local still the
-   default, or should the AI-assisted continuity flows default to `claude`?
+The open questions have been decided (review feedback):
+
+1. **Bible format — YAML canon + prose outline alongside.** `bible.yaml` is the
+   machine-usable canon (enables the §D checker); the prose `outline.md` lives
+   beside it for human reading. Both are committed.
+2. **Recaps in git — committed.** `recaps/NN.md` are kept in source control for
+   reproducibility (they are the context that produced the prose), as a deliberate,
+   documented exception to the "build artifacts are gitignored" rule.
+3. **State model — `status` + free-text `state_changes` to start.** Simple and
+   sufficient for the first cut; the model is designed to extend later to typed
+   state (locations, possessions, knowledge) without breaking existing bibles.
+4. **Writer — LLM-agnostic (see §10).** No flow assumes or hardcodes a vendor.
+
+## 10. LLM-agnostic writer model
+
+Continuity must work with **any** model, local or hosted — no vendor lock-in. This
+is a hard requirement, so the design constrains every AI-assisted flow:
+
+- **Provider-neutral interface.** Every generation (`write outline`, `write
+  chapter`, `recap`, and the optional `check continuity --llm`) goes through the
+  existing `Writer` ABC (`complete(system, user) -> str`). No feature touches a
+  provider SDK directly. Adding a model = adding one `Writer` subclass; nothing
+  else changes.
+- **Provider-neutral prompts.** Continuity prompts are plain `system`/`user` text
+  with no provider-specific features (no tool-calling, no JSON-mode dependency, no
+  vendor-only params). Structured output (e.g. `bible.yaml` stubs, checker
+  findings) is parsed defensively from text — same robust-extraction approach the
+  existing script/JSON parsing uses — so it works on weaker local models too.
+- **A generic OpenAI-compatible backend.** Add `writers/openai_compat.py` driven by
+  `BOOKKIT_LLM_BASE_URL` + `BOOKKIT_LLM_API_KEY`. This single backend covers any
+  OpenAI-compatible endpoint — local (llama.cpp, vLLM, LM Studio, Ollama's compat
+  API) and hosted (OpenRouter, Together, Groq, Fireworks, Azure, …) — which is what
+  makes "agnostic" real rather than "three vendors we happened to wire up."
+- **Configurable default, no hardcoded vendor.** The default writer/model come from
+  config/env (`BOOKKIT_WRITER`, `BOOKKIT_MODEL`), resolved in this order:
+  CLI flag → `book.yaml`/`series.yaml` `writer:` field → env → built-in fallback.
+  The built-in fallback stays a **local, keyless** option so the tool runs offline
+  out of the box, but it is just a default, not an assumption.
+- **`book.yaml`/`series.yaml` may pin a writer** (`writer: openai_compat`,
+  `model: ...`) so a project's continuity generations are reproducible regardless
+  of the operator's shell environment.
+
+Net effect: the canon, recaps, and prompts are all model-independent plain text, so
+the *same* book and series bible produce coherent output on whatever model you point
+`bookkit` at — and you can switch models mid-project without touching the source.
