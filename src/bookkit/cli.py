@@ -25,7 +25,13 @@ from ._output import (
 from .bible import Beat, BibleConfig, StateChange, dump_bible, load_bible
 from .bind import bind
 from .config import BookConfig
-from .prompts import build_chapter_prompts, build_outline_prompts, build_recap_prompts
+from .continuity import check_book, check_series
+from .prompts import (
+    build_chapter_prompts,
+    build_continuity_prompts,
+    build_outline_prompts,
+    build_recap_prompts,
+)
 from .renderers import VALID_FORMATS
 from .scaffold import scaffold_book, scaffold_series
 from .series import load_series, merge_shared_characters, series_context_text
@@ -229,6 +235,137 @@ def cmd_series_new(
             print(f"  {b}/ (book.yaml, bible.yaml, chapters/)")
     else:
         emit(success_envelope("series new", data, start_time=t0), output)
+
+
+# ---------------------------------------------------------------------------
+# Command group: check (continuity guard)
+# ---------------------------------------------------------------------------
+
+check_app = typer.Typer(name="check", help="Verify a book/series against its canon.")
+app.add_typer(check_app)
+
+
+def _llm_findings(book_dir: Path, bible: BibleConfig, writer_name: str, model: str | None) -> list:
+    """Optional LLM continuity pass over each chapter with prose; best-effort."""
+    from .continuity import Finding
+
+    writer = get_writer(writer_name, model)
+    out: list[Finding] = []
+    for beat in sorted(bible.beats, key=lambda b: b.chapter):
+        path = find_chapter_file(book_dir, beat.chapter)
+        if not path:
+            continue
+        canon = bible_to_prompt_text(bible, upto_chapter=beat.chapter)
+        system, user = build_continuity_prompts(
+            canon, beat.chapter, path.read_text(encoding="utf-8")
+        )
+        try:
+            _, block = split_prose_and_yaml(writer.complete(system, user))
+            parsed = yaml.safe_load(block) if block else None
+        except Exception:
+            continue
+        for item in (parsed or {}).get("findings", []) or []:
+            out.append(
+                Finding(
+                    severity=str(item.get("severity", "warning")),
+                    kind=f"llm:{item.get('kind', 'contradiction')}",
+                    detail=str(item.get("detail", "")),
+                    chapter=beat.chapter,
+                )
+            )
+    return out
+
+
+@check_app.command("continuity")
+def cmd_check_continuity(
+    book_dir: Path = typer.Option(
+        Path("."), "--book-dir", "-b", help="Book directory (with bible.yaml)."
+    ),
+    collection: Path = typer.Option(
+        None, "--collection", help="A collection dir (with series.yaml) to check whole."
+    ),
+    scan_prose: bool = typer.Option(
+        False, "--scan-prose", help="Also scan chapter text (not just beats)."
+    ),
+    strict: bool = typer.Option(False, "--strict", help="Treat warnings as failures too."),
+    llm: bool = typer.Option(False, "--llm", help="Add an LLM contradiction pass."),
+    writer: str | None = typer.Option(
+        None, "--writer", "-w", help="LLM backend for --llm. Default: $BOOKKIT_WRITER."
+    ),
+    model: str | None = typer.Option(None, "--model", "-m", help="Model name for --llm."),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", "-o", help="Output format (text|json)."
+    ),
+) -> None:
+    """Check a book (or a whole collection) for continuity violations against its canon."""
+    t0 = time.time()
+    cmd = "check continuity"
+    writer_name = writer or default_writer_name()
+    rows: list[dict] = []  # finding dicts, each optionally tagged with "book"
+
+    def _run_book(bdir: Path, label: str | None) -> None:
+        bible_file = bdir / "bible.yaml"
+        if not bible_file.exists():
+            _die(
+                cmd,
+                output,
+                code=ExitCode.NOT_FOUND,
+                message=f"bible.yaml not found in {bdir}",
+                hint="Scaffold one with 'bookkit new' or 'bookkit write outline'.",
+            )
+        bible = load_bible(bible_file)
+        book_yaml = bdir / "book.yaml"
+        config = (
+            BookConfig.model_validate(yaml.safe_load(book_yaml.read_text(encoding="utf-8")))
+            if book_yaml.exists()
+            else None
+        )
+        findings = check_book(bible, config, bdir, scan_prose=scan_prose)
+        if llm:
+            findings += _llm_findings(bdir, bible, writer_name, model)
+        for f in findings:
+            row = f.to_dict()
+            if label:
+                row["book"] = label
+            rows.append(row)
+
+    if collection is not None:
+        coll = collection.resolve()
+        series_file = coll / "series.yaml"
+        if not series_file.exists():
+            _die(
+                cmd,
+                output,
+                code=ExitCode.NOT_FOUND,
+                message=f"series.yaml not found in {coll}",
+            )
+        series = load_series(series_file)
+        for f in check_series(series):
+            rows.append(f.to_dict())
+        for entry in series.books:
+            _run_book(coll / entry.dir, entry.dir)
+    else:
+        _run_book(book_dir.resolve(), None)
+
+    errors = sum(1 for r in rows if r["severity"] == "error")
+    warnings = sum(1 for r in rows if r["severity"] == "warning")
+    failed = errors > 0 or (strict and warnings > 0)
+
+    if output == OutputFormat.text:
+        for r in rows:
+            where = f"{r['book']} " if r.get("book") else ""
+            ch = f"ch{r['chapter']:>2}" if r.get("chapter") else "  -"
+            print(f"  {where}{ch}  {r['severity'].upper():7} {r['kind']}: {r['detail']}")
+        if not rows:
+            print("No continuity issues found.")
+        else:
+            print(f"{len(rows)} issue(s): {errors} error(s), {warnings} warning(s)")
+    else:
+        data = {"findings": rows, "errors": errors, "warnings": warnings}
+        emit(success_envelope(cmd, data, start_time=t0), output)
+
+    if failed:
+        raise typer.Exit(code=ExitCode.PRECONDITION_FAILED)
 
 
 @write_app.command("outline")
@@ -599,6 +736,27 @@ def cmd_introspect(
                     {"name": "--books", "short": "-n", "type": "integer", "default": 3},
                     {"name": "--chapters", "short": "-c", "type": "integer", "default": 1},
                     {"name": "--dest", "short": "-d", "type": "path", "default": "."},
+                    {
+                        "name": "--output",
+                        "short": "-o",
+                        "type": "enum[text|json]",
+                        "default": "text",
+                    },
+                ],
+            },
+            {
+                "name": "check continuity",
+                "description": "Check a book or collection for continuity violations "
+                "against its canon (bible/series). Exit code 8 on errors.",
+                "idempotent": True,
+                "options": [
+                    {"name": "--book-dir", "short": "-b", "type": "path", "default": "."},
+                    {"name": "--collection", "type": "path", "default": None},
+                    {"name": "--scan-prose", "type": "bool", "default": False},
+                    {"name": "--strict", "type": "bool", "default": False},
+                    {"name": "--llm", "type": "bool", "default": False},
+                    {"name": "--writer", "short": "-w", "type": "string", "default": None},
+                    {"name": "--model", "short": "-m", "type": "string", "default": None},
                     {
                         "name": "--output",
                         "short": "-o",

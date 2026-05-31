@@ -111,8 +111,21 @@ books:
     opens_from: book-01      # inherits book-01's ending state as opening canon
 ```
 
-Still to come (designed, not yet built): a `check continuity` guard.
-Full design: [`docs/continuity.md`](docs/continuity.md).
+### Checking continuity
+
+`bookkit check continuity` is a linter for the canon. It runs deterministic rules — a
+dead/departed character reappearing, name drift, beats that don't match the chapters,
+broken series hand-offs — and exits `8` if it finds errors (so it gates CI):
+
+```bash
+bookkit check continuity -b .                 # one book, against its bible.yaml
+bookkit check continuity -b . --scan-prose    # also scan chapter text, not just beats
+bookkit check continuity --collection .       # a whole series (series.yaml + every book)
+bookkit check continuity -b . --llm           # add an optional LLM contradiction pass
+bookkit check continuity -b . --strict        # treat warnings as failures too
+```
+
+Full design and rule list: [`docs/continuity.md`](docs/continuity.md).
 
 ## LLM-agnostic
 

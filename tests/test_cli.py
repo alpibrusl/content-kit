@@ -65,6 +65,52 @@ def test_series_new_scaffolds_collection(tmp_path: Path) -> None:
     assert series.book("book-02").opens_from == "book-01"
 
 
+def test_check_continuity_clean(tmp_path: Path) -> None:
+    runner.invoke(app, ["new", "Clean Book", "-n", "1", "-d", str(tmp_path)])
+    book = tmp_path / "clean-book"
+    # Fill the scaffold stub so it is internally consistent.
+    import yaml as _yaml
+
+    (book / "bible.yaml").write_text(
+        _yaml.dump(
+            {"characters": [{"name": "MARA"}], "beats": [{"chapter": 1, "summary": "Mara begins."}]}
+        ),
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["check", "continuity", "-b", str(book), "-o", "json"])
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["data"]["errors"] == 0
+
+
+def test_check_continuity_flags_revenant_exit_8(tmp_path: Path) -> None:
+    runner.invoke(app, ["new", "Ghost Book", "-n", "3", "-d", str(tmp_path)])
+    book = tmp_path / "ghost-book"
+    import yaml as _yaml
+
+    (book / "bible.yaml").write_text(
+        _yaml.dump(
+            {
+                "characters": [{"name": "TOMAS"}],
+                "beats": [
+                    {
+                        "chapter": 1,
+                        "state_changes": [{"character": "TOMAS", "set": {"status": "dead"}}],
+                    },
+                    {"chapter": 2, "summary": "quiet"},
+                    {"chapter": 3, "summary": "TOMAS reappears"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["check", "continuity", "-b", str(book), "-o", "json"])
+    assert result.exit_code == 8  # PRECONDITION_FAILED
+    payload = json.loads(result.stdout)
+    assert payload["data"]["errors"] >= 1
+    assert any(f["kind"] == "revenant" for f in payload["data"]["findings"])
+
+
 def test_build_missing_config_errors(tmp_path: Path) -> None:
     result = runner.invoke(app, ["build", "-b", str(tmp_path), "-o", "json"])
     assert result.exit_code == 3  # NOT_FOUND
