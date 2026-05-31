@@ -199,6 +199,123 @@ def cmd_build(
 
 
 # ---------------------------------------------------------------------------
+# Command: audiobook (bridge to podcastkit)
+# ---------------------------------------------------------------------------
+
+
+@app.command("audiobook")
+def cmd_audiobook(
+    book_dir: Path = typer.Option(
+        Path("."), "--book-dir", "-b", help="Book directory containing book.yaml."
+    ),
+    dest: Path = typer.Option(
+        None,
+        "--dest",
+        "-d",
+        help="Where to write the podcastkit project (default: <book-dir>/<slug>-audiobook).",
+    ),
+    backend: str = typer.Option(
+        "kokoro",
+        "--backend",
+        help="TTS backend for the narrator voice (kokoro|chatterbox|openai|elevenlabs).",
+    ),
+    voice: str = typer.Option(
+        "bm_george", "--voice", help="Narrator voice id for the chosen backend."
+    ),
+    narrator: str = typer.Option("NARRATOR", "--narrator", help="Name of the narration character."),
+    max_chars: int = typer.Option(
+        600, "--max-chars", help="Maximum characters per narration line (TTS chunk size)."
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Overwrite existing script.json/episode.yaml files."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Show the plan (episodes, lines, characters) without writing."
+    ),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", "-o", help="Output format (text|json)."
+    ),
+) -> None:
+    """Convert a book into a podcastkit project (script.json + episode.yaml per chapter).
+
+    Reads the book's Markdown chapters and, when present, its bible.yaml — whose
+    cast becomes the audiobook's voice cast — and emits a podcastkit-ready project.
+    Render it with: ``podcastkit generate -e <dir>/chapter_NN`` then
+    ``podcastkit assemble -e <dir>/chapter_NN``.
+    """
+    from .audiobook import plan_audiobook, slugify, write_project
+
+    t0 = time.time()
+    cmd = "audiobook"
+    book_dir = book_dir.resolve()
+    config = _load_config(book_dir, cmd, output)
+
+    missing = [c.file for c in config.chapters if not (book_dir / c.file).exists()]
+    if missing:
+        _die(
+            cmd,
+            output,
+            code=ExitCode.PRECONDITION_FAILED,
+            message=f"{len(missing)} chapter file(s) missing",
+            hints=[f"missing: {m}" for m in missing],
+        )
+
+    bible_file = book_dir / "bible.yaml"
+    bible = load_bible(bible_file) if bible_file.exists() else None
+
+    plan = plan_audiobook(
+        config,
+        book_dir,
+        bible=bible,
+        backend=backend,
+        voice_id=voice,
+        narrator=narrator,
+        max_chars=max_chars,
+    )
+    target = (dest or (book_dir / f"{slugify(config.title)}-audiobook")).resolve()
+
+    if dry_run:
+        planned = [
+            {
+                "episode": ep.name,
+                "title": ep.title,
+                "lines": len(ep.script),
+                "chars": ep.char_count,
+            }
+            for ep in plan.episodes
+        ]
+        envelope = success_envelope(cmd, {}, start_time=t0, dry_run=True, planned_actions=planned)
+        emit(envelope, output)
+        raise typer.Exit(code=ExitCode.DRY_RUN)
+
+    written = write_project(plan, target, force=force)
+
+    data = {
+        "project": str(target),
+        "episodes": len(plan.episodes),
+        "lines": plan.line_count,
+        "characters": len(plan.voices),
+        "chars": plan.char_count,
+        "narrator_backend": backend,
+        "files_written": len(written),
+    }
+    if output == OutputFormat.text:
+        print(f"Wrote audiobook project to {target}")
+        print(f"  episodes:   {data['episodes']} (one per chapter)")
+        print(f"  lines:      {data['lines']}")
+        print(f"  characters: {data['characters']} (cast from bible.yaml + narrator)")
+        print(f"  chars:      {data['chars']} (TTS billing estimate for paid backends)")
+        print(f"  files:      {data['files_written']} written")
+        if written:
+            print(
+                f"  next:       podcastkit generate -e {target.name}/chapter_01 "
+                f"&& podcastkit assemble -e {target.name}/chapter_01"
+            )
+    else:
+        emit(success_envelope(cmd, data, start_time=t0), output)
+
+
+# ---------------------------------------------------------------------------
 # Command group: write (AI-assisted)
 # ---------------------------------------------------------------------------
 
@@ -662,6 +779,39 @@ def cmd_introspect(
                 "examples": [
                     {"description": "Build an EPUB", "invocation": "bookkit build -f epub"},
                     {"description": "Build a PDF", "invocation": "bookkit build -f pdf"},
+                ],
+            },
+            {
+                "name": "audiobook",
+                "description": "Convert a book into a podcastkit project (script.json + "
+                "episode.yaml per chapter); the bible.yaml cast becomes the voice cast. "
+                "Render with podcastkit generate/assemble.",
+                "idempotent": True,
+                "options": [
+                    {"name": "--book-dir", "short": "-b", "type": "path", "default": "."},
+                    {"name": "--dest", "short": "-d", "type": "path", "default": None},
+                    {
+                        "name": "--backend",
+                        "type": "enum[kokoro|chatterbox|openai|elevenlabs]",
+                        "default": "kokoro",
+                    },
+                    {"name": "--voice", "type": "string", "default": "bm_george"},
+                    {"name": "--narrator", "type": "string", "default": "NARRATOR"},
+                    {"name": "--max-chars", "type": "integer", "default": 600},
+                    {"name": "--force", "type": "bool", "default": False},
+                    {"name": "--dry-run", "type": "bool", "default": False},
+                    {
+                        "name": "--output",
+                        "short": "-o",
+                        "type": "enum[text|json]",
+                        "default": "text",
+                    },
+                ],
+                "examples": [
+                    {
+                        "description": "Emit a podcastkit project for the book",
+                        "invocation": "bookkit audiobook -b . --backend kokoro --voice bm_george",
+                    }
                 ],
             },
             {
