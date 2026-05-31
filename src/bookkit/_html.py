@@ -54,6 +54,10 @@ section.front-matter {{ page-break-after: always; text-align: center; }}
 .title-page h1 {{ font-size: 2.6em; margin-top: 30vh; }}
 .title-page .subtitle {{ font-size: 1.3em; color: #444; font-style: italic; }}
 .title-page .author {{ margin-top: 2rem; font-size: 1.1em; }}
+.copyright {{ font-size: 0.9em; color: #444; }}
+.copyright p {{ text-align: center; }}
+.copyright .license {{ margin-top: 1.5rem; }}
+.copyright .notice {{ font-size: 0.85em; }}
 nav.toc {{ text-align: left; }}
 nav.toc ol {{ list-style: none; padding: 0; }}
 nav.toc li {{ margin: 0.4rem 0; }}
@@ -89,9 +93,26 @@ def _title_page(config: BookConfig) -> str:
 
 
 def _copyright_page(config: BookConfig) -> str:
+    rights = config.copyright
+    holder = rights.holder or config.author.name
     lines = [f"<p>{_esc(config.title)}</p>"]
-    if config.author.name:
-        lines.append(f"<p>&copy; {_esc(config.author.name)}</p>")
+
+    notice = "&copy;"
+    if rights.year:
+        notice += f" {_esc(rights.year)}"
+    if holder:
+        notice += f" {_esc(holder)}"
+    if notice != "&copy;":
+        lines.append(f"<p>{notice}</p>")
+
+    if rights.license:
+        label = _esc(rights.license)
+        if rights.license_url:
+            label = f'<a href="{_esc(rights.license_url)}">{label}</a>'
+        lines.append(f'<p class="license">{label}</p>')
+    for paragraph in rights.notice:
+        lines.append(f'<p class="notice">{_esc(paragraph)}</p>')
+
     if config.isbn:
         lines.append(f"<p>ISBN {_esc(config.isbn)}</p>")
     return '<section class="front-matter copyright">\n' + "\n".join(lines) + "\n</section>"

@@ -27,6 +27,22 @@ class Theme(BaseModel):
     font_size_pt: float = 11.0
 
 
+class Copyright(BaseModel):
+    """Rights and licence details for the optional "copyright" front-matter page.
+
+    All wording lives here, in the book's own config, so the page stays
+    language-agnostic: the engine renders the structure, the book supplies the
+    words. Every field is optional; an empty block reproduces the legacy page
+    (title, "© author", ISBN).
+    """
+
+    holder: str = ""  # rights holder; falls back to author.name when empty
+    year: str = ""  # e.g. "2026"
+    license: str = ""  # short label, e.g. "CC BY-NC-ND 4.0" or "Todos los derechos reservados"
+    license_url: str = ""  # canonical URL for the licence; linked when present
+    notice: list[str] = []  # extra paragraphs rendered verbatim (terms, AI disclosure, ...)
+
+
 class ChapterEntry(BaseModel):
     file: str  # path to the chapter's Markdown source, relative to the book directory
     title: str = ""  # overrides the chapter's leading "# Heading" when set
@@ -40,6 +56,7 @@ class BookConfig(BaseModel):
     output: str = "book.epub"  # final artifact filename; extension swapped per --format
     cover: str = ""  # path to a cover image (PNG/JPG), relative to the book directory
     isbn: str = ""
+    copyright: Copyright = Copyright()  # rights/licence shown on the "copyright" page
     series: str = ""  # optional path to a series.yaml (relative to the book dir)
     theme: Theme = Theme()
     chapters: list[ChapterEntry]  # ordered, like an episode timeline
