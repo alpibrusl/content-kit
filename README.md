@@ -9,6 +9,7 @@ packages/
   core/         content-kit-core — the shared spine (imported by everything)
   bookkit/      books as code → EPUB / PDF, and the audio/visual bridges
   podcastkit/   scripts → audio dramas & podcasts (TTS + ffmpeg mixing)
+  mcp/          content-kit-mcp — an MCP server exposing the CLIs as agent tools
 ```
 
 ## Architecture
@@ -43,6 +44,16 @@ pip install -e ./packages/core \
 ruff check packages && ruff format --check packages
 lint-imports                       # the dependency-arrow contracts
 pytest packages/core packages/bookkit packages/podcastkit
+```
+
+### Driving the toolchain from an agent
+
+`content-kit-mcp` exposes every CLI command as an MCP tool, generated from each
+CLI's own `introspect` contract (so it never drifts):
+
+```bash
+pip install -e ./packages/mcp     # pulls in bookkit + podcastkit
+content-kit-mcp                   # serve over stdio
 ```
 
 See each package's own `README.md` for tier-specific usage.

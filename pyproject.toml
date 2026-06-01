@@ -48,13 +48,19 @@ quote-style = "double"
 # ---------------------------------------------------------------------------
 
 [tool.importlinter]
-root_packages = ["content_kit_core", "bookkit", "podcastkit"]
+root_packages = ["content_kit_core", "bookkit", "podcastkit", "content_kit_mcp"]
 
 [[tool.importlinter.contracts]]
 name = "core must not import the renderers"
 type = "forbidden"
 source_modules = ["content_kit_core"]
 forbidden_modules = ["bookkit", "podcastkit"]
+
+[[tool.importlinter.contracts]]
+name = "the toolkit must not import the MCP adapter"
+type = "forbidden"
+source_modules = ["content_kit_core", "bookkit", "podcastkit"]
+forbidden_modules = ["content_kit_mcp"]
 
 [[tool.importlinter.contracts]]
 name = "bookkit must not import podcastkit"

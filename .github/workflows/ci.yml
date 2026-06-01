@@ -18,7 +18,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install ruff import-linter
-          pip install -e ./packages/core -e ./packages/bookkit -e ./packages/podcastkit
+          pip install -e ./packages/core -e ./packages/bookkit -e ./packages/podcastkit -e ./packages/mcp
       - name: Ruff (lint)
         run: ruff check packages
       - name: Ruff (format)
@@ -43,10 +43,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ./packages/core \
                       -e './packages/bookkit[epub,dev]' \
-                      -e './packages/podcastkit[dev]'
+                      -e './packages/podcastkit[dev]' \
+                      -e './packages/mcp[dev]'
       - name: Test content-kit-core
         run: pytest packages/core
       - name: Test bookkit
         run: pytest packages/bookkit
       - name: Test podcastkit
         run: pytest packages/podcastkit
+      - name: Test content-kit-mcp
+        run: pytest packages/mcp
