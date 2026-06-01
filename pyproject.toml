@@ -1,0 +1,69 @@
+# content-kit — workspace root.
+#
+# A monorepo for the content platform: one shared core and a thin package per
+# media tier. This root is a *virtual* workspace (no distributable of its own);
+# it carries the shared dev tooling, the linter config, and the architectural
+# guardrails (import-linter contracts) that keep the dependency arrows honest.
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+content-kit-core = { workspace = true }
+bookkit = { workspace = true }
+podcastkit = { workspace = true }
+
+# ---------------------------------------------------------------------------
+# Ruff — shared across every package in the workspace.
+# ---------------------------------------------------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = [
+    "B008",   # typer.Option() in defaults — intended pattern for typer CLIs
+    "SIM108", # ternary collapse — sometimes less readable
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/*" = ["S101"]   # assert is fine in tests
+
+[tool.ruff.lint.isort]
+# All workspace packages are first-party, so cross-package imports group together
+# regardless of which package's tree a file lives in.
+known-first-party = ["content_kit_core", "bookkit", "podcastkit"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ---------------------------------------------------------------------------
+# import-linter — the architectural contract enforced in CI.
+#
+# The shared core never imports a renderer (the dependency arrow points one
+# way), and the renderers never import each other: the link between tools is a
+# data artifact (a validated bridge file), never a function call.
+# ---------------------------------------------------------------------------
+
+[tool.importlinter]
+root_packages = ["content_kit_core", "bookkit", "podcastkit"]
+
+[[tool.importlinter.contracts]]
+name = "core must not import the renderers"
+type = "forbidden"
+source_modules = ["content_kit_core"]
+forbidden_modules = ["bookkit", "podcastkit"]
+
+[[tool.importlinter.contracts]]
+name = "bookkit must not import podcastkit"
+type = "forbidden"
+source_modules = ["bookkit"]
+forbidden_modules = ["podcastkit"]
+
+[[tool.importlinter.contracts]]
+name = "podcastkit must not import bookkit"
+type = "forbidden"
+source_modules = ["podcastkit"]
+forbidden_modules = ["bookkit"]
