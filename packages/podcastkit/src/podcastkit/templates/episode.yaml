@@ -1,0 +1,50 @@
+# podcastkit episode configuration
+title: "Episode 1"
+output: "episode_01.mp3"
+
+# Voice cast: character name -> TTS config
+# backend choices: chatterbox | elevenlabs | kokoro | openai
+voices:
+  HOST:
+    backend: elevenlabs
+    voice_id: nPczCjzI2devNBz1zQrb
+    model_id: eleven_multilingual_v2
+    settings:
+      stability: 0.70
+      similarity_boost: 0.70
+      style: 0.0
+      use_speaker_boost: true
+  GUEST:
+    backend: kokoro
+    voice_id: bm_george          # Kokoro voice name (e.g. bm_george, af_bella)
+  NARRATOR:
+    backend: chatterbox
+    voice_id: ""                 # path to reference audio for voice cloning, or "" for default
+    model_id: standard           # standard | turbo | multilingual
+    settings:
+      exaggeration: 0.5          # 0.25-2.0  emotion intensity
+      cfg_weight: 0.5            # 0.0-1.0   pace (lower = faster)
+      temperature: 0.8           # 0.05-5.0  consistency (lower = more consistent)
+
+# Ordered voice lines: id matches script.json, pre_silence in seconds
+timeline:
+  - id: host_01
+    pre_silence: 0.5
+  - id: guest_01
+    pre_silence: 0.4
+
+# Background tracks (looped long audio)
+bg_tracks:
+  - file: sfx/office_ambience.mp3
+    start: [host_01, start, 0.0]
+    fade_in: 2.0
+    fade_out_at: [host_01, end, 2.0]
+    fade_out_dur: 2.0
+    volume_db: -25.0
+    loop: true
+
+# Short SFX one-shots
+sfx_hits:
+  - file: sfx/notification.mp3
+    at: [host_01, end, 0.1]
+    volume: 0.6

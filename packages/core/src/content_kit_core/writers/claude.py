@@ -16,7 +16,7 @@ class ClaudeWriter(Writer):
             import anthropic
         except ImportError as exc:
             raise RuntimeError(
-                "anthropic is not installed. Run: pip install 'bookkit[claude]'"
+                "anthropic is not installed. Run: pip install 'content-kit-core[claude]'"
             ) from exc
 
         api_key = os.environ.get("ANTHROPIC_API_KEY")

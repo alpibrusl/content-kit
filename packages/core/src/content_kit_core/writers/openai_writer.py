@@ -16,7 +16,7 @@ class OpenAIWriter(Writer):
             import openai
         except ImportError as exc:
             raise RuntimeError(
-                "openai is not installed. Run: pip install 'bookkit[openai]'"
+                "openai is not installed. Run: pip install 'content-kit-core[openai]'"
             ) from exc
 
         api_key = os.environ.get("OPENAI_API_KEY")

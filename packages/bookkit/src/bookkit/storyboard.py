@@ -19,40 +19,15 @@ a target size) — so it is fully unit-testable without any image model.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
+
+from content_kit_core.bridge import Panel, Storyboard, StoryboardChapter
 
 from ._dialogue import Matcher, attribute_paragraph
 from ._manuscript import load_chapter, split_title
 from .audiobook import chunk_text, markdown_to_speech, slugify
 from .bible import BibleConfig
 from .config import BookConfig
-
-
-@dataclass
-class Panel:
-    id: str
-    scene: str  # narration / description for the panel
-    dialogue: list[dict] = field(default_factory=list)  # [{character, text}]
-    characters: list[str] = field(default_factory=list)  # present, for art consistency
-    art_notes: list[str] = field(default_factory=list)  # appearance cues from the bible
-
-
-@dataclass
-class StoryboardChapter:
-    name: str  # output sub-directory, e.g. "chapter_01"
-    title: str
-    panels: list[Panel] = field(default_factory=list)
-
-
-@dataclass
-class Storyboard:
-    project: str
-    chapters: list[StoryboardChapter]
-
-    @property
-    def panel_count(self) -> int:
-        return sum(len(c.panels) for c in self.chapters)
 
 
 def _art_notes(characters: list[str], bible: BibleConfig | None) -> list[str]:

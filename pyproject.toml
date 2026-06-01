@@ -1,40 +1,20 @@
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+# content-kit — workspace root.
+#
+# A monorepo for the content platform: one shared core and a thin package per
+# media tier. This root is a *virtual* workspace (no distributable of its own);
+# it carries the shared dev tooling, the linter config, and the architectural
+# guardrails (import-linter contracts) that keep the dependency arrows honest.
 
-[project]
-name = "bookkit"
-version = "0.1.0"
-description = "CLI for producing books as code — Markdown chapters rendered to EPUB and PDF"
-requires-python = ">=3.10"
-dependencies = [
-    "typer>=0.12",
-    "pyyaml>=6.0",
-    "pydantic>=2.0",
-    "requests>=2.31",
-    "markdown>=3.5",
-]
+[tool.uv.workspace]
+members = ["packages/*"]
 
-[project.optional-dependencies]
-epub = ["ebooklib>=0.18"]
-pdf = ["weasyprint>=60"]
-claude = ["anthropic>=0.25"]
-openai = ["openai>=1.30"]
-dev = [
-    "pytest>=8.0",
-    "pytest-cov>=5.0",
-    "ruff>=0.4",
-    "pre-commit>=3.7",
-]
-
-[project.scripts]
-bookkit = "bookkit.cli:app"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/bookkit"]
+[tool.uv.sources]
+content-kit-core = { workspace = true }
+bookkit = { workspace = true }
+podcastkit = { workspace = true }
 
 # ---------------------------------------------------------------------------
-# Ruff
+# Ruff — shared across every package in the workspace.
 # ---------------------------------------------------------------------------
 
 [tool.ruff]
@@ -49,30 +29,41 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]   # assert is fine in tests
+"**/tests/*" = ["S101"]   # assert is fine in tests
+
+[tool.ruff.lint.isort]
+# All workspace packages are first-party, so cross-package imports group together
+# regardless of which package's tree a file lives in.
+known-first-party = ["content_kit_core", "bookkit", "podcastkit"]
 
 [tool.ruff.format]
 quote-style = "double"
 
 # ---------------------------------------------------------------------------
-# Pytest
+# import-linter — the architectural contract enforced in CI.
+#
+# The shared core never imports a renderer (the dependency arrow points one
+# way), and the renderers never import each other: the link between tools is a
+# data artifact (a validated bridge file), never a function call.
 # ---------------------------------------------------------------------------
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "--tb=short -q"
+[tool.importlinter]
+root_packages = ["content_kit_core", "bookkit", "podcastkit"]
 
-[tool.coverage.run]
-source = ["src/bookkit"]
-omit = [
-    "*/renderers/epub.py",
-    "*/renderers/pdf.py",
-    "*/writers/claude.py",
-    "*/writers/ollama.py",
-    "*/writers/openai_writer.py",
-    "*/writers/openai_compat.py",
-]
+[[tool.importlinter.contracts]]
+name = "core must not import the renderers"
+type = "forbidden"
+source_modules = ["content_kit_core"]
+forbidden_modules = ["bookkit", "podcastkit"]
 
-[tool.coverage.report]
-show_missing = true
-skip_covered = false
+[[tool.importlinter.contracts]]
+name = "bookkit must not import podcastkit"
+type = "forbidden"
+source_modules = ["bookkit"]
+forbidden_modules = ["podcastkit"]
+
+[[tool.importlinter.contracts]]
+name = "podcastkit must not import bookkit"
+type = "forbidden"
+source_modules = ["podcastkit"]
+forbidden_modules = ["bookkit"]

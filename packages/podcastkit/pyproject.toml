@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "podcastkit"
+version = "0.1.0"
+description = "CLI for producing audio dramas and podcasts with TTS + ffmpeg mixing"
+requires-python = ">=3.10"
+dependencies = [
+    "content-kit-core",
+    "typer>=0.12",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+audiocraft = ["transformers>=4.40", "torch>=2.0"]
+chatterbox = ["chatterbox-tts>=0.1", "torch>=2.0", "numpy>=1.24"]
+# The LLM writers live in content-kit-core; these forward to its extras.
+claude = ["content-kit-core[claude]"]
+kokoro = ["kokoro>=0.7", "numpy>=1.24"]
+openai = ["content-kit-core[openai]"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.4",
+    "pre-commit>=3.7",
+]
+
+[project.scripts]
+podcastkit = "podcastkit.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/podcastkit"]
+
+# Ruff config is centralized at the workspace root pyproject.toml.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"
+
+[tool.coverage.run]
+source = ["src/podcastkit"]
+omit = [
+    "*/backends/chatterbox.py",
+    "*/backends/elevenlabs.py",
+    "*/backends/kokoro.py",
+    "*/backends/openai_tts.py",
+    "*/sfx/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

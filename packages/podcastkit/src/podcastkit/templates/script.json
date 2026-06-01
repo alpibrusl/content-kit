@@ -1,0 +1,4 @@
+[
+  {"id": "host_01", "character": "HOST", "text": "Welcome to the show."},
+  {"id": "guest_01", "character": "GUEST", "text": "Thanks for having me."}
+]

@@ -31,6 +31,8 @@ from pathlib import Path
 
 import yaml
 
+from content_kit_core.bridge import validate_episode, validate_script
+
 from ._dialogue import attribute
 from ._manuscript import load_chapter, split_title
 from .bible import BibleConfig
@@ -343,6 +345,10 @@ def write_project(plan: AudiobookPlan, dest: Path, *, force: bool = False) -> li
                 {"id": line.id, "character": line.character, "text": line.text}
                 for line in episode.script
             ]
+            # Validate against the shared audio-bridge contract *before* writing, so
+            # any drift between what bookkit emits and what podcastkit can render
+            # fails here — in this producer's own tests — not later at the consumer.
+            validate_script(payload)
             script_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
             )
@@ -356,6 +362,7 @@ def write_project(plan: AudiobookPlan, dest: Path, *, force: bool = False) -> li
                 "voices": plan.voices,
                 "timeline": episode.timeline,
             }
+            validate_episode(doc)  # same contract the renderer loads — see above
             episode_path.write_text(
                 yaml.dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8"
             )

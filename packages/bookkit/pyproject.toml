@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bookkit"
+version = "0.1.0"
+description = "CLI for producing books as code — Markdown chapters rendered to EPUB and PDF"
+requires-python = ">=3.10"
+dependencies = [
+    "content-kit-core",
+    "typer>=0.12",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "markdown>=3.5",
+]
+
+[project.optional-dependencies]
+epub = ["ebooklib>=0.18"]
+pdf = ["weasyprint>=60"]
+# The LLM writers live in content-kit-core; these forward to its extras so
+# `pip install bookkit[claude]` keeps pulling the right SDK.
+claude = ["content-kit-core[claude]"]
+openai = ["content-kit-core[openai]"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.4",
+    "pre-commit>=3.7",
+]
+
+[project.scripts]
+bookkit = "bookkit.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bookkit"]
+
+# Ruff config is centralized at the workspace root pyproject.toml.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"
+
+[tool.coverage.run]
+source = ["src/bookkit"]
+omit = [
+    "*/renderers/epub.py",
+    "*/renderers/pdf.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

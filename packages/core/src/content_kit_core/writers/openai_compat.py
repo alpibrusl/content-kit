@@ -7,6 +7,15 @@ import requests
 from .base import Writer
 
 
+def _env(*names: str) -> str | None:
+    """First set value among ``names`` (canonical first, legacy fallbacks)."""
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return None
+
+
 class OpenAICompatWriter(Writer):
     """Generic OpenAI-compatible chat backend — the key to being LLM-agnostic.
 
@@ -16,10 +25,12 @@ class OpenAICompatWriter(Writer):
     plain HTTP via requests (a core dependency), so no provider SDK or extra is
     required.
 
-    Configuration (all overridable via constructor args):
-      BOOKKIT_LLM_BASE_URL   e.g. http://localhost:8080/v1  or  https://openrouter.ai/api/v1
-      BOOKKIT_LLM_API_KEY    bearer token (optional for local servers)
-      BOOKKIT_MODEL          model id, e.g. llama-3.1-8b-instruct
+    Configuration (all overridable via constructor args). The canonical
+    ``CONTENTKIT_*`` names are read first; the legacy ``BOOKKIT_*`` names are
+    still honored so existing setups keep working after the consolidation:
+      CONTENTKIT_LLM_BASE_URL  e.g. http://localhost:8080/v1  or  https://openrouter.ai/api/v1
+      CONTENTKIT_LLM_API_KEY   bearer token (optional for local servers)
+      CONTENTKIT_MODEL         model id, e.g. llama-3.1-8b-instruct
     """
 
     def __init__(
@@ -29,15 +40,17 @@ class OpenAICompatWriter(Writer):
         base_url: str | None = None,
         api_key: str | None = None,
     ) -> None:
-        self.base_url = (base_url or os.environ.get("BOOKKIT_LLM_BASE_URL") or "").rstrip("/")
-        self.api_key = api_key or os.environ.get("BOOKKIT_LLM_API_KEY") or ""
-        self.model = model or os.environ.get("BOOKKIT_MODEL") or "gpt-4o-mini"
+        self.base_url = (
+            base_url or _env("CONTENTKIT_LLM_BASE_URL", "BOOKKIT_LLM_BASE_URL") or ""
+        ).rstrip("/")
+        self.api_key = api_key or _env("CONTENTKIT_LLM_API_KEY", "BOOKKIT_LLM_API_KEY") or ""
+        self.model = model or _env("CONTENTKIT_MODEL", "BOOKKIT_MODEL") or "gpt-4o-mini"
 
     def complete(self, system: str, user: str) -> str:
         if not self.base_url:
             raise RuntimeError(
-                "BOOKKIT_LLM_BASE_URL is not set. Point it at any OpenAI-compatible "
-                "endpoint, e.g. export BOOKKIT_LLM_BASE_URL=http://localhost:8080/v1"
+                "CONTENTKIT_LLM_BASE_URL is not set. Point it at any OpenAI-compatible "
+                "endpoint, e.g. export CONTENTKIT_LLM_BASE_URL=http://localhost:8080/v1"
             )
         headers = {"Content-Type": "application/json"}
         if self.api_key:

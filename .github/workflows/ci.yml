@@ -6,29 +6,47 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    name: Lint + architecture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install tooling + workspace (import-linter needs packages importable)
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff import-linter
+          pip install -e ./packages/core -e ./packages/bookkit -e ./packages/podcastkit
+      - name: Ruff (lint)
+        run: ruff check packages
+      - name: Ruff (format)
+        run: ruff format --check packages
+      - name: import-linter (dependency-arrow contracts)
+        run: lint-imports
+
   test:
+    name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install
-        run: python -m pip install --upgrade pip && pip install -e '.[dev]'
-
-      - name: Lint (ruff check)
-        run: ruff check src tests
-
-      - name: Format (ruff format --check)
-        run: ruff format --check src tests
-
-      - name: Test
-        run: pytest -q
+      - name: Install workspace (core + renderers + dev extras)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ./packages/core \
+                      -e './packages/bookkit[epub,dev]' \
+                      -e './packages/podcastkit[dev]'
+      - name: Test content-kit-core
+        run: pytest packages/core
+      - name: Test bookkit
+        run: pytest packages/bookkit
+      - name: Test podcastkit
+        run: pytest packages/podcastkit
