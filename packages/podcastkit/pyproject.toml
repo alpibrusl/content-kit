@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "podcastkit"
 version = "0.1.0"
 description = "CLI for producing audio dramas and podcasts with TTS + ffmpeg mixing"
+license = "EUPL-1.2"
 requires-python = ">=3.10"
 dependencies = [
     "content-kit-core",

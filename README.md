@@ -57,3 +57,10 @@ content-kit-mcp                   # serve over stdio
 ```
 
 See each package's own `README.md` for tier-specific usage.
+
+## License
+
+Licensed under the **[European Union Public Licence v1.2](LICENSE)** (EUPL-1.2) —
+an OSI-approved licence: use, study, modify and redistribute freely, including
+commercially, provided derivative works that you distribute are shared under the
+EUPL (or a compatible licence). See [`LICENSE`](LICENSE) for the full text.

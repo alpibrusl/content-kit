@@ -6,6 +6,7 @@ build-backend = "hatchling.build"
 name = "bookkit"
 version = "0.1.0"
 description = "CLI for producing books as code — Markdown chapters rendered to EPUB and PDF"
+license = "EUPL-1.2"
 requires-python = ">=3.10"
 dependencies = [
     "content-kit-core",
