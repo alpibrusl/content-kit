@@ -22,6 +22,11 @@ class Theme(BaseModel):
     """
 
     stylesheet: str = ""  # path to a custom CSS file, or "" to use the built-in default
+    # How a custom stylesheet combines with the built-in one. "replace" (the
+    # historical behavior) uses the custom file alone — you own every rule.
+    # "extend" appends it after the built-in CSS, so you only override what
+    # you care about and keep the engine's page setup for the rest.
+    stylesheet_mode: Literal["replace", "extend"] = "replace"
     base_font: Literal["serif", "sans", "mono"] = "serif"
     page_size: Literal["6x9", "5x8", "a4", "letter"] = "6x9"  # PDF page geometry
     font_size_pt: float = 11.0
@@ -48,6 +53,13 @@ class ChapterEntry(BaseModel):
     title: str = ""  # overrides the chapter's leading "# Heading" when set
 
 
+class MatterEntry(BaseModel):
+    """A Markdown file rendered as a front/back-matter section (colophon, dedication, ...)."""
+
+    file: str  # path to the section's Markdown source, relative to the book directory
+    title: str = ""  # overrides the file's leading "# Heading" when set
+
+
 class BookConfig(BaseModel):
     title: str
     subtitle: str = ""
@@ -61,4 +73,6 @@ class BookConfig(BaseModel):
     theme: Theme = Theme()
     chapters: list[ChapterEntry]  # ordered, like an episode timeline
     front_matter: list[Literal["title_page", "copyright", "toc"]] = ["title_page", "toc"]
-    back_matter: list[Literal["about_author"]] = []
+    # Built-in sections by keyword ("about_author") and/or Markdown files
+    # ({file: COLOPHON.md, title: Colophon}), rendered in list order.
+    back_matter: list[Literal["about_author"] | MatterEntry] = []

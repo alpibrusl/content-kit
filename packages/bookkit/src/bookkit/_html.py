@@ -7,11 +7,14 @@ in one place means a book looks the same whatever it is rendered to.
 
 from __future__ import annotations
 
+import base64
 import html
+import mimetypes
 from pathlib import Path
 
-from ._manuscript import Chapter
-from .config import BookConfig
+from ._labels import labels_for
+from ._manuscript import Chapter, render_markdown, slugify, split_title
+from .config import BookConfig, MatterEntry
 
 _FONT_STACKS = {
     "serif": 'Georgia, "Iowan Old Style", "Times New Roman", serif',
@@ -51,6 +54,8 @@ h1, h2, h3 {{ line-height: 1.2; font-weight: 600; }}
 h1.chapter-title {{ font-size: 1.8em; margin: 0 0 1.5rem; }}
 section.chapter {{ page-break-before: always; }}
 section.front-matter {{ page-break-after: always; text-align: center; }}
+section.cover {{ text-align: center; }}
+section.cover img {{ max-width: 100%; max-height: 96vh; }}
 .title-page h1 {{ font-size: 2.6em; margin-top: 30vh; }}
 .title-page .subtitle {{ font-size: 1.3em; color: #444; font-style: italic; }}
 .title-page .author {{ margin-top: 2rem; font-size: 1.1em; }}
@@ -118,11 +123,12 @@ def _copyright_page(config: BookConfig) -> str:
     return '<section class="front-matter copyright">\n' + "\n".join(lines) + "\n</section>"
 
 
-def _toc(chapters: list[Chapter]) -> str:
+def _toc(config: BookConfig, chapters: list[Chapter]) -> str:
+    heading = labels_for(config.language)["contents"]
     items = "\n".join(f'<li><a href="#{c.id}">{_esc(c.title)}</a></li>' for c in chapters)
     return (
         '<section class="front-matter toc">\n<nav class="toc">\n'
-        "<h1>Contents</h1>\n<ol>\n"
+        f"<h1>{_esc(heading)}</h1>\n<ol>\n"
         f"{items}\n</ol>\n</nav>\n</section>"
     )
 
@@ -130,26 +136,65 @@ def _toc(chapters: list[Chapter]) -> str:
 def _about_author(config: BookConfig) -> str:
     if not (config.author.name or config.author.bio):
         return ""
-    body = f"<h1>About the Author</h1>\n<p>{_esc(config.author.bio)}</p>"
+    heading = labels_for(config.language)["about_author"]
+    body = f"<h1>{_esc(heading)}</h1>\n<p>{_esc(config.author.bio)}</p>"
     return f'<section class="chapter about-author">\n{body}\n</section>'
+
+
+def _cover_section(config: BookConfig, book_dir: Path) -> str:
+    """Cover page for the single-document renderers (HTML, PDF).
+
+    The image is inlined as a data URI so the HTML artifact stays
+    self-contained and the PDF needs no asset path at render time.
+    """
+    if not config.cover:
+        return ""
+    cover_path = book_dir / config.cover
+    if not cover_path.exists():
+        return ""
+    mime = mimetypes.guess_type(cover_path.name)[0] or "image/png"
+    data = base64.b64encode(cover_path.read_bytes()).decode("ascii")
+    alt = labels_for(config.language)["cover"]
+    return (
+        '<section class="front-matter cover">\n'
+        f'<img src="data:{mime};base64,{data}" alt="{_esc(alt)}">\n'
+        "</section>"
+    )
+
+
+def _matter_file_section(entry: MatterEntry, book_dir: Path) -> tuple[str, str, str]:
+    """Load a Markdown matter file → ``(slug, title, html section)``."""
+    path = book_dir / entry.file
+    title, body = split_title(path.read_text(encoding="utf-8"))
+    title = entry.title or title or path.stem
+    slug = slugify(title) or slugify(path.stem)
+    section = (
+        f'<section class="chapter matter" id="{slug}">\n'
+        f'<h1 class="chapter-title">{_esc(title)}</h1>\n'
+        f"{render_markdown(body)}\n"
+        "</section>"
+    )
+    return slug, title, section
 
 
 def front_matter_sections(config: BookConfig, chapters: list[Chapter]) -> list[str]:
     builders = {
         "title_page": lambda: _title_page(config),
         "copyright": lambda: _copyright_page(config),
-        "toc": lambda: _toc(chapters),
+        "toc": lambda: _toc(config, chapters),
     }
     return [builders[name]() for name in config.front_matter if name in builders]
 
 
-def back_matter_sections(config: BookConfig) -> list[str]:
+def back_matter_sections(config: BookConfig, book_dir: Path) -> list[str]:
     out = []
-    for name in config.back_matter:
-        if name == "about_author":
+    for entry in config.back_matter:
+        if entry == "about_author":
             section = _about_author(config)
             if section:
                 out.append(section)
+        elif isinstance(entry, MatterEntry):
+            out.append(_matter_file_section(entry, book_dir)[2])
     return out
 
 
@@ -160,9 +205,10 @@ def iter_front_matter(config: BookConfig) -> list[tuple[str, str, str]]:
     is omitted on purpose: those renderers build their own navigation, so a
     second hand-rolled table of contents would only duplicate it.
     """
+    labels = labels_for(config.language)
     builders = {
-        "title_page": ("title-page", config.title or "Title", lambda: _title_page(config)),
-        "copyright": ("copyright", "Copyright", lambda: _copyright_page(config)),
+        "title_page": ("title-page", config.title or labels["title"], lambda: _title_page(config)),
+        "copyright": ("copyright", labels["copyright"], lambda: _copyright_page(config)),
     }
     docs = []
     for name in config.front_matter:
@@ -172,33 +218,45 @@ def iter_front_matter(config: BookConfig) -> list[tuple[str, str, str]]:
     return docs
 
 
-def iter_back_matter(config: BookConfig) -> list[tuple[str, str, str]]:
+def iter_back_matter(config: BookConfig, book_dir: Path) -> list[tuple[str, str, str]]:
     """Back matter as discrete ``(slug, title, html)`` documents (EPUB)."""
     docs = []
-    for name in config.back_matter:
-        if name == "about_author":
+    for entry in config.back_matter:
+        if entry == "about_author":
             html = _about_author(config)
             if html:
-                docs.append(("about-author", "About the Author", html))
+                docs.append(("about-author", labels_for(config.language)["about_author"], html))
+        elif isinstance(entry, MatterEntry):
+            docs.append(_matter_file_section(entry, book_dir))
     return docs
 
 
 def resolve_css(config: BookConfig, book_dir: Path) -> str:
-    """Return the stylesheet text — a custom file if set, else the built-in default."""
+    """Return the stylesheet text.
+
+    A custom file replaces the built-in default (``stylesheet_mode: replace``,
+    the historical behavior) or is appended after it (``extend``), so a book can
+    override a few rules without owning the whole page setup.
+    """
     if config.theme.stylesheet:
         css_path = book_dir / config.theme.stylesheet
         if css_path.exists():
-            return css_path.read_text(encoding="utf-8")
+            custom = css_path.read_text(encoding="utf-8")
+            if config.theme.stylesheet_mode == "extend":
+                return default_css(config) + "\n/* --- custom stylesheet (extend) --- */\n" + custom
+            return custom
     return default_css(config)
 
 
 def build_document(config: BookConfig, chapters: list[Chapter], book_dir: Path) -> str:
     """Assemble a complete, standalone HTML document for the whole book."""
     css = resolve_css(config, book_dir)
+    cover = _cover_section(config, book_dir)
     body_sections = [
+        *([cover] if cover else []),
         *front_matter_sections(config, chapters),
         *(chapter_section(c) for c in chapters),
-        *back_matter_sections(config),
+        *back_matter_sections(config, book_dir),
     ]
     body = "\n".join(body_sections)
     lang = _esc(config.language)

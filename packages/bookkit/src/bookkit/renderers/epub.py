@@ -74,7 +74,7 @@ class EpubRenderer(Renderer):
             spine.append(item)
             toc.append(item)
 
-        for slug, title, content in iter_back_matter(config):
+        for slug, title, content in iter_back_matter(config, book_dir):
             item = make_item(slug, title, content)
             spine.append(item)
             toc.append(item)
