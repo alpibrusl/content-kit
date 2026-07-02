@@ -115,9 +115,7 @@ def test_stylesheet_mode_replace_and_extend(tmp_book) -> None:
 
 
 def test_back_matter_file_entry_renders_as_section(tmp_book) -> None:
-    (tmp_book / "COLOPHON.md").write_text(
-        "# Colofón\n\nHecho con *bookkit*.\n", encoding="utf-8"
-    )
+    (tmp_book / "COLOPHON.md").write_text("# Colofón\n\nHecho con *bookkit*.\n", encoding="utf-8")
     html = _doc(tmp_book, back_matter=[{"file": "COLOPHON.md", "title": ""}, "about_author"])
     assert '<h1 class="chapter-title">Colofón</h1>' in html
     assert "<em>bookkit</em>" in html
