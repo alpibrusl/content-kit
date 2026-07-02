@@ -146,21 +146,28 @@ subtitle: "A Field Guide"
 author:
   name: "A. Author"
   bio: "Writes about systems."
-language: en
+language: en                        # also localizes generated labels (Contents, ...)
 output: "compliance-engine.epub"   # build/<stem>.<format>
-cover: "cover.png"                  # optional, used by the EPUB renderer
+cover: "cover.png"                  # embedded in EPUB; a cover page in HTML/PDF
 isbn: ""
 theme:
   base_font: serif                  # serif | sans | mono
   page_size: 6x9                    # 6x9 | 5x8 | a4 | letter  (PDF geometry)
   font_size_pt: 11.0
   stylesheet: ""                    # path to custom CSS, or "" for the built-in
+  stylesheet_mode: replace          # replace (own every rule) | extend (override on top)
 chapters:                           # ordered; the first "# Heading" is the title
   - { file: chapters/01-intro.md, title: "" }
   - { file: chapters/02-setup.md, title: "Getting Started" }
 front_matter: [title_page, toc]     # also: copyright
-back_matter:  [about_author]
+back_matter:                        # keywords and/or Markdown files, in order
+  - { file: COLOPHON.md, title: "" }
+  - about_author
 ```
+
+Generated headings ("Contents", "About the Author", "Copyright", …) follow
+`language:` — `es`, `fr`, `de`, `it`, `pt` and `ca` ship out of the box, and
+anything else falls back to English.
 
 ---
 
