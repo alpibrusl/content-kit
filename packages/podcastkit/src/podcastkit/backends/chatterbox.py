@@ -13,6 +13,20 @@ MIN_VALID_BYTES = 5 * 1024
 _models: dict[str, Any] = {}
 
 
+def _default_device(torch: Any) -> str:
+    """Pick the best available accelerator: cuda > mps > cpu.
+
+    Without the MPS probe, Apple Silicon Macs silently fell through to CPU
+    inference (torch.cuda is never available there), making generation several
+    times slower than it needed to be.
+    """
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 def _get_model(model_type: str, device: str) -> Any:
     key = f"{model_type}:{device}"
     if key in _models:
@@ -70,7 +84,7 @@ class ChatterboxBackend(Backend):
 
         settings = voice.settings
         model_type = voice.model_id or "standard"
-        device = settings.get("device", "cuda" if torch.cuda.is_available() else "cpu")
+        device = settings.get("device", _default_device(torch))
 
         model = _get_model(model_type, device)
 
