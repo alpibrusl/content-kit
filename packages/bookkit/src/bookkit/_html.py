@@ -59,6 +59,7 @@ def _embedded_font_faces() -> str:
         )
     return "\n".join(faces)
 
+
 _PAGE_SIZES = {
     "6x9": "6in 9in",
     "5x8": "5in 8in",
