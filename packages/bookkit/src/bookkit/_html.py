@@ -8,8 +8,10 @@ in one place means a book looks the same whatever it is rendered to.
 from __future__ import annotations
 
 import base64
+import functools
 import html
 import mimetypes
+import re
 from pathlib import Path
 
 from ._labels import labels_for
@@ -17,10 +19,45 @@ from ._manuscript import Chapter, render_markdown, slugify, split_title
 from .config import BookConfig, MatterEntry
 
 _FONT_STACKS = {
-    "serif": 'Georgia, "Iowan Old Style", "Times New Roman", serif',
+    "serif": '"EB Garamond", Georgia, "Iowan Old Style", "Times New Roman", serif',
     "sans": '"Helvetica Neue", Arial, system-ui, sans-serif',
     "mono": '"SF Mono", "DejaVu Sans Mono", Consolas, monospace',
 }
+
+_FONTS_DIR = Path(__file__).parent / "assets" / "fonts"
+_EMBEDDED_FONT_FILES = {
+    "normal": "EBGaramond12-Regular.otf",
+    "bold": "EBGaramond12-Bold.otf",
+    "italic": "EBGaramond12-Italic.otf",
+}
+
+
+@functools.lru_cache(maxsize=1)
+def _embedded_font_faces() -> str:
+    """``@font-face`` rules embedding EB Garamond (OFL-1.1) as data URIs.
+
+    Bundling a real book typeface — rather than trusting the reader's system
+    Georgia/Times fallback — is what makes the PDF and EPUB look the same
+    everywhere instead of drifting with whatever fonts happen to be
+    installed. See ``assets/fonts/OFL-EBGaramond.txt`` for the licence.
+    """
+    faces = []
+    styles = {"normal": "normal", "bold": "normal", "italic": "italic"}
+    weights = {"normal": "400", "bold": "700", "italic": "400"}
+    for key, filename in _EMBEDDED_FONT_FILES.items():
+        path = _FONTS_DIR / filename
+        if not path.exists():
+            return ""
+        data = base64.b64encode(path.read_bytes()).decode("ascii")
+        faces.append(
+            "@font-face {\n"
+            '  font-family: "EB Garamond";\n'
+            f"  font-style: {styles[key]};\n"
+            f"  font-weight: {weights[key]};\n"
+            f'  src: url("data:font/otf;base64,{data}") format("opentype");\n'
+            "}"
+        )
+    return "\n".join(faces)
 
 _PAGE_SIZES = {
     "6x9": "6in 9in",
@@ -35,12 +72,22 @@ def default_css(config: BookConfig) -> str:
     theme = config.theme
     font = _FONT_STACKS.get(theme.base_font, _FONT_STACKS["serif"])
     page = _PAGE_SIZES.get(theme.page_size, _PAGE_SIZES["6x9"])
+    font_faces = _embedded_font_faces() if theme.base_font == "serif" else ""
     return f"""\
+{font_faces}
 @page {{
   size: {page};
-  margin: 18mm 16mm;
+  margin: 22mm 16mm 20mm;
+  @top-center {{
+    content: string(chaptertitle);
+    font-size: 8pt;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #9a9a9a;
+  }}
   @bottom-center {{ content: counter(page); font-size: 9pt; color: #666; }}
 }}
+@page :first {{ @top-center {{ content: none; }} }}
 body {{
   font-family: {font};
   font-size: {theme.font_size_pt}pt;
@@ -51,11 +98,21 @@ body {{
   padding: 2rem 1rem;
 }}
 h1, h2, h3 {{ line-height: 1.2; font-weight: 600; }}
-h1.chapter-title {{ font-size: 1.8em; margin: 0 0 1.5rem; }}
-section.chapter {{ page-break-before: always; }}
-section.front-matter {{ page-break-after: always; text-align: center; }}
-section.cover {{ text-align: center; }}
-section.cover img {{ max-width: 100%; max-height: 96vh; }}
+h1.chapter-title {{ font-size: 1.8em; margin: 0 0 1.5rem; string-set: chaptertitle content(); }}
+p.chapter-number {{
+  margin: 0 0 0.5rem;
+  font-size: 0.8em;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #9a9a9a;
+}}
+section.chapter {{ page-break-before: always; padding-top: 1rem; }}
+section.front-matter {{ page-break-after: always; text-align: center; page: frontmatter; }}
+@page frontmatter {{ @top-center {{ content: none; }} }}
+section.cover {{ page: cover; margin: -2rem -1rem 0; padding: 0; line-height: 0; }}
+section.cover img {{ width: 100%; display: block; }}
+@page cover {{ margin: 0; @top-center {{ content: none; }} @bottom-center {{ content: none; }} }}
 .title-page h1 {{ font-size: 2.6em; margin-top: 30vh; }}
 .title-page .subtitle {{ font-size: 1.3em; color: #444; font-style: italic; }}
 .title-page .author {{ margin-top: 2rem; font-size: 1.1em; }}
@@ -65,8 +122,12 @@ section.cover img {{ max-width: 100%; max-height: 96vh; }}
 .copyright .notice {{ font-size: 0.85em; }}
 nav.toc {{ text-align: left; }}
 nav.toc ol {{ list-style: none; padding: 0; }}
-nav.toc li {{ margin: 0.4rem 0; }}
+nav.toc li {{ margin: 0.5rem 0; }}
 nav.toc a {{ text-decoration: none; color: #1a1a1a; }}
+nav.toc a::after {{
+  content: leader(".") target-counter(attr(href), page);
+  color: #999;
+}}
 p {{ margin: 0 0 0.8rem; text-align: justify; }}
 blockquote {{ border-left: 3px solid #ccc; margin: 1rem 0; padding-left: 1rem; color: #444; }}
 code {{ font-family: {_FONT_STACKS["mono"]}; font-size: 0.9em; }}
@@ -78,14 +139,27 @@ def _esc(text: str) -> str:
     return html.escape(text, quote=False)
 
 
+_CHAPTER_NUM_RE = re.compile(r"^(Chapter\s+\d+)\s*[—–-]\s*(.+)$", re.IGNORECASE)
+
+
 def chapter_section(chapter: Chapter) -> str:
-    """Standalone HTML <section> for one chapter (heading + body)."""
-    return (
-        f'<section class="chapter" id="{chapter.id}">\n'
-        f'<h1 class="chapter-title">{_esc(chapter.title)}</h1>\n'
-        f"{chapter.html}\n"
-        "</section>"
-    )
+    """Standalone HTML <section> for one chapter (heading + body).
+
+    A title of the form "Chapter N — Title" (the convention a book.yaml
+    override uses to put visible numbers in the rendered book) splits into a
+    small numeral label above the heading proper, so the number reads as
+    typographic structure rather than just more words in the title.
+    """
+    match = _CHAPTER_NUM_RE.match(chapter.title)
+    if match:
+        number, rest = match.groups()
+        heading = (
+            f'<p class="chapter-number">{_esc(number)}</p>\n'
+            f'<h1 class="chapter-title">{_esc(rest)}</h1>'
+        )
+    else:
+        heading = f'<h1 class="chapter-title">{_esc(chapter.title)}</h1>'
+    return f'<section class="chapter" id="{chapter.id}">\n{heading}\n{chapter.html}\n</section>'
 
 
 def _title_page(config: BookConfig) -> str:
