@@ -129,6 +129,9 @@ nav.toc a::after {{
   content: leader(".") target-counter(attr(href), page);
   color: #999;
 }}
+ul {{ list-style: none; margin: 0 0 0.8rem; padding-left: 1.4em; }}
+ul li {{ margin: 0 0 0.3rem; }}
+ul li::before {{ content: "\\00B7\\00A0\\00A0"; font-weight: 700; }}
 p {{ margin: 0 0 0.8rem; text-align: justify; }}
 blockquote {{ border-left: 3px solid #ccc; margin: 1rem 0; padding-left: 1rem; color: #444; }}
 code {{ font-family: {_FONT_STACKS["mono"]}; font-size: 0.9em; }}
