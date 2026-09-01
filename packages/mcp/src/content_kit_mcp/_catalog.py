@@ -17,9 +17,20 @@ import subprocess
 from dataclasses import dataclass
 from typing import Any
 
-#: Option carried by every command for output format; the server always forces
-#: JSON, so it is never exposed as a tool parameter.
+#: Option carried by most commands for output *format*; the server always
+#: forces JSON on those, so it is never exposed as a tool parameter. A command
+#: may reuse the same name for an output *path* (``bookkit write outline
+#: --output outline.md``) — that one is a real parameter and must not be
+#: confused with the format flag, so the two are told apart by type, not name.
 _OUTPUT_OPTION = "--output"
+
+
+def _is_format_option(opt: dict[str, Any]) -> bool:
+    """True for the ``--output text|json`` format switch, not for a path."""
+    if opt.get("name") != _OUTPUT_OPTION:
+        return False
+    type_str = opt.get("type", "")
+    return type_str.startswith("enum[") and "json" in type_str[len("enum[") : -1].split("|")
 
 
 @dataclass(frozen=True)
@@ -74,7 +85,7 @@ def build_input_schema(command: dict[str, Any]) -> dict[str, Any]:
             required.append(key)
 
     for opt in command.get("options", []):
-        if opt["name"] == _OUTPUT_OPTION:
+        if _is_format_option(opt):
             continue  # the server forces JSON; not a user-facing knob
         key = _param_key(opt["name"])
         prop = _schema_for_type(opt.get("type", "string"))
@@ -95,7 +106,7 @@ def build_input_schema(command: dict[str, Any]) -> dict[str, Any]:
 
 
 def _has_output_option(command: dict[str, Any]) -> bool:
-    return any(opt["name"] == _OUTPUT_OPTION for opt in command.get("options", []))
+    return any(_is_format_option(opt) for opt in command.get("options", []))
 
 
 def build_argv(spec: ToolSpec, arguments: dict[str, Any]) -> list[str]:
@@ -114,7 +125,7 @@ def build_argv(spec: ToolSpec, arguments: dict[str, Any]) -> list[str]:
     # defaults stand otherwise.
     for opt in spec.command.get("options", []):
         name = opt["name"]
-        if name == _OUTPUT_OPTION:
+        if _is_format_option(opt):
             continue
         key = _param_key(name)
         if key not in arguments or arguments[key] is None:
