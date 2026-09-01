@@ -34,7 +34,7 @@ CATALOG = {
                 "arguments": [{"name": "concept", "required": True}],
                 "options": [
                     {"name": "--writer", "type": "enum[claude|ollama|openai]"},
-                    {"name": "--output", "type": "enum[text|json]"},
+                    {"name": "--output", "type": "path", "default": "outline.md"},
                 ],
             },
             {
@@ -98,7 +98,17 @@ def test_build_argv_positional_and_option_and_forced_json(specs):
 
 def test_build_argv_group_command(specs):
     argv = build_argv(specs["bookkit_write_outline"], {"concept": "a heist"})
-    assert argv == ["bookkit", "write", "outline", "a heist", "--output", "json"]
+    # write outline's --output is a *path*, not the format switch: the tool
+    # must neither hide it nor append "--output json" and clobber it.
+    assert argv == ["bookkit", "write", "outline", "a heist"]
+
+
+def test_path_typed_output_option_is_a_real_parameter(specs):
+    spec = specs["bookkit_write_outline"]
+    assert spec.json_output is False
+    assert "output" in spec.input_schema["properties"]
+    argv = build_argv(spec, {"concept": "a heist", "output": "plans/outline.md"})
+    assert argv == ["bookkit", "write", "outline", "a heist", "--output", "plans/outline.md"]
 
 
 def test_build_argv_missing_required_raises(specs):
