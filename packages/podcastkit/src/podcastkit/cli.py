@@ -9,6 +9,7 @@ from pathlib import Path
 import typer
 import yaml
 
+from . import _manifest
 from ._exit_codes import ExitCode
 from ._output import (
     OutputFormat,
@@ -209,7 +210,9 @@ def cmd_generate(
     # --- Synthesize ---
     voices_dir.mkdir(parents=True, exist_ok=True)
     total = len(script)
-    skipped = generated = errors = 0
+    skipped = generated = errors = unverified = restaled = 0
+    recorded = _manifest.load(voices_dir)
+    digests = dict(recorded)
 
     for i, entry in enumerate(script, 1):
         line_id: str = entry["id"]
@@ -217,14 +220,28 @@ def cmd_generate(
         text: str = entry["text"]
         dest_path = voices_dir / f"{line_id}.mp3"
 
-        if not force and dest_path.exists() and dest_path.stat().st_size >= MIN_VALID_BYTES:
+        cached = dest_path.exists() and dest_path.stat().st_size >= MIN_VALID_BYTES
+        state = _manifest.status(recorded, line_id, text) if cached else "missing"
+        # A line whose text has changed since it was rendered is re-rendered.
+        # A line that predates the manifest cannot be checked, so it is adopted:
+        # kept as-is (re-synthesizing every line could be an unexpected bill on
+        # a paid backend) and recorded against the text now in the script. That
+        # is an assumption, stated once in the summary -- and it is what makes
+        # the *next* edit detectable, which never-recording would not.
+        if not force and cached and state != "stale":
             skipped += 1
+            if state == "unverified":
+                unverified += 1
+            digests[line_id] = _manifest.text_digest(text)
             if output == OutputFormat.text:
                 size_kb = dest_path.stat().st_size // 1024
-                print(f"[{i:02d}/{total}] {line_id:<12s}  skip (exists, {size_kb} KB)")
+                note = " (unverified)" if state == "unverified" else ""
+                print(f"[{i:02d}/{total}] {line_id:<12s}  skip (exists, {size_kb} KB){note}")
             else:
                 emit_progress(line_id, "skipped", detail=f"{character} {i}/{total}")
             continue
+        if cached and state == "stale":
+            restaled += 1
 
         if output == OutputFormat.text:
             print(f"[{i:02d}/{total}] {line_id:<12s}  {character:<10s}  {text[:60]!r}")
@@ -237,9 +254,10 @@ def cmd_generate(
             voice_cfg = voice_cfg.model_copy(update={"backend": backend_override})
 
         try:
-            if force and dest_path.exists():
+            if dest_path.exists():
                 dest_path.unlink()
             get_backend(effective_backend).synthesize(text, voice_cfg, dest_path)
+            digests[line_id] = _manifest.text_digest(text)
             generated += 1
             if output == OutputFormat.json:
                 emit_progress(line_id, "generated", detail=f"{character} {i}/{total}")
@@ -253,6 +271,11 @@ def cmd_generate(
 
         if effective_backend == "elevenlabs" and i < total:
             time.sleep(1.0)
+
+    # Record what each surviving file was rendered from, pruning ids the script
+    # no longer has, so the manifest never outlives its audio.
+    live = {e["id"] for e in script}
+    _manifest.save(voices_dir, {k: v for k, v in digests.items() if k in live})
 
     # Final checks
     missing_files = [e["id"] for e in script if not (voices_dir / f"{e['id']}.mp3").exists()]
@@ -270,8 +293,18 @@ def cmd_generate(
     size_mb = round(total_bytes / 1024 / 1024, 2)
 
     if output == OutputFormat.text:
-        print(f"\nGenerated: {generated}   Skipped: {skipped}   Errors: {errors}")
+        summary = f"\nGenerated: {generated}   Skipped: {skipped}   Errors: {errors}"
+        if restaled:
+            summary += f"   Re-rendered (text changed): {restaled}"
+        print(summary)
         print(f"Total voices size: {size_mb} MB")
+        if unverified:
+            print(
+                f"{unverified} line(s) predated text tracking and have been adopted as a "
+                "baseline: they are assumed to match the script as it reads now, so any "
+                "future edit is caught. If they were edited before today, re-run with "
+                "--force to be certain."
+            )
 
     if missing_files:
         _die(
@@ -298,7 +331,14 @@ def cmd_generate(
             hint="Check the errors above and rerun.",
         )
 
-    data = {"generated": generated, "skipped": skipped, "total": total, "size_mb": size_mb}
+    data = {
+        "generated": generated,
+        "skipped": skipped,
+        "restaled": restaled,
+        "unverified": unverified,
+        "total": total,
+        "size_mb": size_mb,
+    }
     if output == OutputFormat.text:
         print(f"All {total} voice lines present. Ready to assemble.")
     else:
@@ -320,6 +360,11 @@ def cmd_assemble(
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Validate config and voice files without running ffmpeg."
+    ),
+    keep_intermediate: bool = typer.Option(
+        False,
+        "--keep-intermediate",
+        help="Keep build/voices_track.wav after assembly (useful when debugging a mix).",
     ),
     output: OutputFormat = typer.Option(
         OutputFormat.text, "--output", "-o", help="Output format (text|json)."
@@ -395,7 +440,7 @@ def cmd_assemble(
     # --- Assemble ---
     log = print if output == OutputFormat.text else lambda *a, **kw: None
     try:
-        result = assemble(episode_dir, config, log=log)
+        result = assemble(episode_dir, config, log=log, keep_intermediate=keep_intermediate)
     except SystemExit as exc:
         _die(
             cmd,

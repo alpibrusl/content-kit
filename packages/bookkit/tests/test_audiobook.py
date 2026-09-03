@@ -250,3 +250,74 @@ def test_plan_is_pure_dataclass():
     plan = AudiobookPlan(project="p", episodes=[], voices={}, narrator="NARRATOR")
     assert plan.line_count == 0
     assert plan.char_count == 0
+
+
+def test_inline_diagrams_are_not_narrated() -> None:
+    """A house-style SVG diagram is visual apparatus, like a code listing."""
+    md = (
+        "Before the diagram.\n\n"
+        '<div style="margin:1.6rem 0;">\n'
+        '<svg viewBox="0 0 680 120" xmlns="http://www.w3.org/2000/svg">\n'
+        '<text x="10" y="20">SOURCE CODE</text>\n'
+        '<rect x="1" y="2" stroke-width="1.1"/>\n'
+        "</svg>\n</div>\n\n"
+        "After the diagram."
+    )
+    spoken = markdown_to_speech(md)
+    assert "Before the diagram." in spoken
+    assert "After the diagram." in spoken
+    for leak in ("svg", "viewBox", "xmlns", "stroke-width", "<div", "rect"):
+        assert leak not in spoken, f"{leak!r} reached the narrator"
+
+
+def test_html_comments_are_not_narrated() -> None:
+    assert "note to self" not in markdown_to_speech("Text.\n\n<!-- note to self -->\n\nMore.")
+
+
+def test_inline_html_keeps_its_text() -> None:
+    """Dropping a diagram is right; dropping a caption's words is not."""
+    spoken = markdown_to_speech("<figure><figcaption>The chain, named once.</figcaption></figure>")
+    assert "The chain, named once." in spoken
+
+
+def test_tables_narrate_as_sentences_not_pipes() -> None:
+    """A table's cells are the content; only its arrangement is visual."""
+    md = (
+        "| | Question | Where |\n"
+        "|---|---|---|\n"
+        "| 1 | Would this assumption flip the answer? | Chapter 8 |\n"
+    )
+    spoken = markdown_to_speech(md)
+    assert "|" not in spoken
+    assert "---" not in spoken
+    assert "Would this assumption flip the answer?" in spoken
+    assert "Chapter 8" in spoken
+
+
+def test_a_table_row_gets_sentence_punctuation() -> None:
+    spoken = markdown_to_speech("| Cost | Chapter 13 |\n")
+    assert spoken.endswith(".")
+
+
+def test_an_edited_chapter_regenerates_its_script(tmp_path):
+    """The script is derived from the manuscript, so it must follow it.
+
+    Skipping a script.json that merely exists means a corrected chapter
+    regenerates to nothing and the stale text is then narrated as if current.
+    """
+    config = _make_book(tmp_path, [("chapters/01.md", "Hello world.")])
+    dest = tmp_path / "out"
+    write_project(plan_audiobook(config, tmp_path), dest)
+
+    (tmp_path / "chapters" / "01.md").write_text("Hello, corrected world.", encoding="utf-8")
+    written = write_project(plan_audiobook(config, tmp_path), dest)
+
+    assert "chapter_01/script.json" in written
+    assert "corrected" in (dest / "chapter_01" / "script.json").read_text(encoding="utf-8")
+
+
+def test_an_unchanged_chapter_is_not_rewritten(tmp_path):
+    config = _make_book(tmp_path, [("chapters/01.md", "Hello world.")])
+    dest = tmp_path / "out"
+    write_project(plan_audiobook(config, tmp_path), dest)
+    assert write_project(plan_audiobook(config, tmp_path), dest) == []

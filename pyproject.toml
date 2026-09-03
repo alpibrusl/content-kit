@@ -40,6 +40,20 @@ known-first-party = ["content_kit_core", "bookkit", "podcastkit"]
 quote-style = "double"
 
 # ---------------------------------------------------------------------------
+# pytest — shared across the workspace.
+#
+# Every package keeps its own `tests/` package, so all four would otherwise
+# import as the same top-level module name (`tests.conftest`, `tests.test_cli`)
+# and collide the moment more than one package is collected in a single run.
+# importlib import mode derives a unique module name from each file's real
+# path, which is what makes `pytest packages/...` across several packages work.
+# ---------------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+addopts = "--tb=short -q --import-mode=importlib"
+testpaths = ["packages"]
+
+# ---------------------------------------------------------------------------
 # import-linter — the architectural contract enforced in CI.
 #
 # The shared core never imports a renderer (the dependency arrow points one

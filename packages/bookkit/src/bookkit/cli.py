@@ -7,11 +7,14 @@ from pathlib import Path
 import typer
 import yaml
 
+from content_kit_core.ledger import load_ledger
+
 from ._context import (
     assemble_recap,
     bible_to_prompt_text,
     find_chapter_file,
     prev_chapter_text,
+    read_chapters,
 )
 from ._errors import BookKitError
 from ._exit_codes import ExitCode
@@ -25,13 +28,16 @@ from ._output import (
 from .bible import Beat, BibleConfig, StateChange, dump_bible, load_bible
 from .bind import bind
 from .config import BookConfig
-from .continuity import check_book, check_series
+from .continuity import check_book, check_series, check_terms
+from .duplication import DEFAULT_CUTOFF, DEFAULT_THRESHOLD, check_duplication
+from .glossary import render_glossary
 from .prompts import (
     build_chapter_prompts,
     build_continuity_prompts,
     build_outline_prompts,
     build_recap_prompts,
 )
+from .prose import check_prose, fix_commas
 from .renderers import VALID_FORMATS
 from .scaffold import scaffold_book, scaffold_series
 from .series import load_series, merge_shared_characters, series_context_text
@@ -580,6 +586,224 @@ def cmd_check_continuity(
         raise typer.Exit(code=ExitCode.PRECONDITION_FAILED)
 
 
+def _load_ledger_file(book_dir: Path, ledger: Path | None, cmd: str, fmt: OutputFormat):
+    """Locate and load a book's concept ledger, or die with an actionable hint."""
+    path = ledger if ledger is not None else book_dir / "glossary.yaml"
+    if not path.exists():
+        _die(
+            cmd,
+            fmt,
+            code=ExitCode.NOT_FOUND,
+            message=f"no concept ledger found at {path}",
+            hint="Expository books keep one at glossary.yaml; pass --ledger for another path.",
+        )
+    return load_ledger(path)
+
+
+@check_app.command("terms")
+def cmd_check_terms(
+    book_dir: Path = typer.Option(
+        Path("."), "--book-dir", "-b", help="Book directory (with glossary.yaml)."
+    ),
+    ledger: Path = typer.Option(
+        None, "--ledger", help="Concept ledger path. Default: <book-dir>/glossary.yaml."
+    ),
+    ledger_only: bool = typer.Option(
+        False, "--ledger-only", help="Check the ledger's own consistency; don't scan prose."
+    ),
+    require_analogy: bool = typer.Option(
+        False,
+        "--require-analogy",
+        help="Also report concepts that commit to no analogy (off by default).",
+    ),
+    strict: bool = typer.Option(False, "--strict", help="Treat warnings as failures too."),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", "-o", help="Output format (text|json)."
+    ),
+) -> None:
+    """Check an expository book's prose against its concept ledger. Exit 8 on errors."""
+    t0 = time.time()
+    cmd = "check terms"
+    bdir = book_dir.resolve()
+    led = _load_ledger_file(bdir, ledger, cmd, output)
+
+    chapters = None if ledger_only else read_chapters(bdir)
+    n_chapters = None
+    book_yaml = bdir / "book.yaml"
+    if book_yaml.exists():
+        raw = yaml.safe_load(book_yaml.read_text(encoding="utf-8")) or {}
+        n_chapters = len(BookConfig.model_validate(raw).chapters) or None
+
+    findings = check_terms(led, chapters, n_chapters=n_chapters, require_analogy=require_analogy)
+    rows = [f.to_dict() for f in findings]
+    errors = sum(1 for r in rows if r["severity"] == "error")
+    warnings = sum(1 for r in rows if r["severity"] == "warning")
+
+    if output == OutputFormat.text:
+        for r in rows:
+            ch = f"ch{r['chapter']:>2}" if r.get("chapter") else "  -"
+            print(f"  {ch}  {r['severity'].upper():7} {r['kind']}: {r['detail']}")
+        scanned = f"{len(chapters)} chapters" if chapters else "the ledger only"
+        print(
+            f"\nchecked {len(led.concepts)} concepts against {scanned}: "
+            f"{errors} error(s), {warnings} warning(s)"
+        )
+    else:
+        data = {
+            "findings": rows,
+            "errors": errors,
+            "warnings": warnings,
+            "concepts": len(led.concepts),
+            "chapters": len(chapters or {}),
+        }
+        emit(success_envelope(cmd, data, start_time=t0), output)
+
+    if errors or (strict and warnings):
+        raise typer.Exit(code=ExitCode.PRECONDITION_FAILED)
+
+
+@check_app.command("prose")
+def cmd_check_prose(
+    book_dir: Path = typer.Option(
+        Path("."), "--book-dir", "-b", help="Book directory containing book.yaml."
+    ),
+    fix: bool = typer.Option(
+        False, "--fix", help="Rewrite the chapters, applying the mechanical fixes."
+    ),
+    strict: bool = typer.Option(False, "--strict", help="Exit 8 if anything is reported."),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", "-o", help="Output format (text|json)."
+    ),
+) -> None:
+    """Check the manuscript's prose against the house style rules."""
+    t0 = time.time()
+    cmd = "check prose"
+    bdir = book_dir.resolve()
+    config = _load_config(bdir, cmd, output)
+    chapters = read_chapters(bdir, config)
+
+    if fix:
+        changed: list[dict] = []
+        for entry in config.chapters:
+            path = bdir / entry.file
+            if not path.exists():
+                continue
+            original = path.read_text(encoding="utf-8")
+            rewritten, n = fix_commas(original)
+            if n:
+                path.write_text(rewritten, encoding="utf-8")
+                changed.append({"file": entry.file, "commas_removed": n})
+        total = sum(c["commas_removed"] for c in changed)
+        if output == OutputFormat.text:
+            for c in changed:
+                print(f"  {c['file']}: {c['commas_removed']} comma(s) removed")
+            print(
+                f"\nfixed {total} comma(s) before a restrictive because-clause "
+                f"across {len(changed)} file(s)"
+            )
+        else:
+            emit(success_envelope(cmd, {"changed": changed, "fixed": total}, start_time=t0), output)
+        return
+
+    rows = [f.to_dict() for f in check_prose(chapters)]
+    if output == OutputFormat.text:
+        for r in rows:
+            ch = f"ch{r['chapter']:>2}" if r.get("chapter") else "  -"
+            print(f"  {ch}  {r['kind']}: {r['detail']}")
+        print(f"\nchecked {len(chapters)} chapters: {len(rows)} note(s)")
+    else:
+        emit(success_envelope(cmd, {"findings": rows, "notes": len(rows)}, start_time=t0), output)
+
+    if strict and rows:
+        raise typer.Exit(code=ExitCode.PRECONDITION_FAILED)
+
+
+@check_app.command("duplication")
+def cmd_check_duplication(
+    book_dir: Path = typer.Option(
+        Path("."), "--book-dir", "-b", help="Book directory containing book.yaml."
+    ),
+    against: list[Path] = typer.Option(
+        ..., "--against", help="A sibling book to compare with. Repeatable."
+    ),
+    cutoff: float = typer.Option(
+        DEFAULT_CUTOFF, "--cutoff", help="Sentence similarity at which two sentences count as one."
+    ),
+    threshold: float = typer.Option(
+        DEFAULT_THRESHOLD,
+        "--threshold",
+        help="Share of a chapter that may be shared before it is reported.",
+    ),
+    strict: bool = typer.Option(False, "--strict", help="Exit 8 if anything is reported."),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", "-o", help="Output format (text|json)."
+    ),
+) -> None:
+    """Report chapters that share too much prose with a sibling book."""
+    t0 = time.time()
+    cmd = "check duplication"
+    bdir = book_dir.resolve()
+    rows: list[dict] = []
+    for other in against:
+        other_dir = other.resolve()
+        if not (other_dir / "book.yaml").exists() and not (other_dir / "chapters").exists():
+            _die(
+                cmd,
+                output,
+                code=ExitCode.NOT_FOUND,
+                message=f"no book found at {other_dir}",
+                hint="Pass the sibling book's repository root to --against.",
+            )
+        for f in check_duplication(bdir, other_dir, cutoff=cutoff, threshold=threshold):
+            row = f.to_dict()
+            row["against"] = other_dir.name
+            rows.append(row)
+
+    if output == OutputFormat.text:
+        for r in rows:
+            print(f"  ch{r['chapter']:>2}  {r['kind']}: {r['detail']}")
+        names = ", ".join(p.resolve().name for p in against)
+        print(f"\ncompared against {names}: {len(rows)} chapter(s) over the threshold")
+    else:
+        emit(success_envelope(cmd, {"findings": rows, "flagged": len(rows)}, start_time=t0), output)
+
+    if strict and rows:
+        raise typer.Exit(code=ExitCode.PRECONDITION_FAILED)
+
+
+@app.command("glossary")
+def cmd_glossary(
+    book_dir: Path = typer.Option(
+        Path("."), "--book-dir", "-b", help="Book directory (with glossary.yaml)."
+    ),
+    ledger: Path = typer.Option(
+        None, "--ledger", help="Concept ledger path. Default: <book-dir>/glossary.yaml."
+    ),
+    out: Path = typer.Option(
+        None, "--out", help="Where to write the glossary. Default: <book-dir>/GLOSSARY.md."
+    ),
+    title: str = typer.Option("Glossary", "--title", help="Heading for the generated section."),
+    output: OutputFormat = typer.Option(
+        OutputFormat.text, "--output", "-o", help="Output format (text|json)."
+    ),
+) -> None:
+    """Generate the back-matter glossary from the concept ledger."""
+    t0 = time.time()
+    cmd = "glossary"
+    bdir = book_dir.resolve()
+    led = _load_ledger_file(bdir, ledger, cmd, output)
+
+    destination = out if out is not None else bdir / "GLOSSARY.md"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(render_glossary(led, title=title), encoding="utf-8")
+
+    data = {"path": str(destination), "terms": len(led.concepts)}
+    if output == OutputFormat.text:
+        print(f"wrote {destination} — {len(led.concepts)} terms")
+    else:
+        emit(success_envelope(cmd, data, start_time=t0), output)
+
+
 @write_app.command("outline")
 def cmd_write_outline(
     concept: str = typer.Argument(..., help="One or more sentences describing the book."),
@@ -1019,6 +1243,110 @@ def cmd_introspect(
                         "type": "enum[text|json]",
                         "default": "text",
                     },
+                ],
+            },
+            {
+                "name": "check terms",
+                "description": "Check an expository book's prose against its concept "
+                "ledger (glossary.yaml): jargon used before it is defined, broken or "
+                "inverted prerequisites, unused terms. Exit code 8 on errors.",
+                "idempotent": True,
+                "options": [
+                    {"name": "--book-dir", "short": "-b", "type": "path", "default": "."},
+                    {"name": "--ledger", "type": "path", "default": "<book-dir>/glossary.yaml"},
+                    {"name": "--ledger-only", "type": "bool", "default": False},
+                    {"name": "--require-analogy", "type": "bool", "default": False},
+                    {"name": "--strict", "type": "bool", "default": False},
+                    {
+                        "name": "--output",
+                        "short": "-o",
+                        "type": "enum[text|json]",
+                        "default": "text",
+                    },
+                ],
+                "examples": [
+                    {
+                        "description": "Gate a manuscript against its ledger",
+                        "invocation": "bookkit check terms -b .",
+                    }
+                ],
+            },
+            {
+                "name": "check duplication",
+                "description": "Report chapters that share too much prose with a sibling "
+                "book: per chapter, how much of it has a near-twin somewhere in the other "
+                "book. Warnings only unless --strict.",
+                "idempotent": True,
+                "options": [
+                    {"name": "--book-dir", "short": "-b", "type": "path", "default": "."},
+                    {"name": "--against", "type": "path", "default": None},
+                    {"name": "--cutoff", "type": "number", "default": 0.85},
+                    {"name": "--threshold", "type": "number", "default": 0.25},
+                    {"name": "--strict", "type": "bool", "default": False},
+                    {
+                        "name": "--output",
+                        "short": "-o",
+                        "type": "enum[text|json]",
+                        "default": "text",
+                    },
+                ],
+                "examples": [
+                    {
+                        "description": "Compare two volumes of a series",
+                        "invocation": "bookkit check duplication -b . --against ../other-book",
+                    }
+                ],
+            },
+            {
+                "name": "check prose",
+                "description": "Check the manuscript against the house style rules: a comma "
+                "before a restrictive because-clause, 'because' twice in one sentence. "
+                "Warnings only; --fix applies the mechanical corrections.",
+                "idempotent": True,
+                "options": [
+                    {"name": "--book-dir", "short": "-b", "type": "path", "default": "."},
+                    {"name": "--fix", "type": "bool", "default": False},
+                    {"name": "--strict", "type": "bool", "default": False},
+                    {
+                        "name": "--output",
+                        "short": "-o",
+                        "type": "enum[text|json]",
+                        "default": "text",
+                    },
+                ],
+                "examples": [
+                    {
+                        "description": "Report style notes",
+                        "invocation": "bookkit check prose -b .",
+                    },
+                    {
+                        "description": "Apply the mechanical fixes",
+                        "invocation": "bookkit check prose -b . --fix",
+                    },
+                ],
+            },
+            {
+                "name": "glossary",
+                "description": "Generate the back-matter glossary (GLOSSARY.md) from the "
+                "concept ledger. The ledger is source; the glossary is a build artifact.",
+                "idempotent": True,
+                "options": [
+                    {"name": "--book-dir", "short": "-b", "type": "path", "default": "."},
+                    {"name": "--ledger", "type": "path", "default": "<book-dir>/glossary.yaml"},
+                    {"name": "--out", "type": "path", "default": "<book-dir>/GLOSSARY.md"},
+                    {"name": "--title", "type": "string", "default": "Glossary"},
+                    {
+                        "name": "--output",
+                        "short": "-o",
+                        "type": "enum[text|json]",
+                        "default": "text",
+                    },
+                ],
+                "examples": [
+                    {
+                        "description": "Regenerate the glossary",
+                        "invocation": "bookkit glossary -b .",
+                    }
                 ],
             },
             {

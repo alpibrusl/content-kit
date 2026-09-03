@@ -127,6 +127,79 @@ bookkit check continuity -b . --strict        # treat warnings as failures too
 
 Full design and rule list: [`docs/continuity.md`](docs/continuity.md).
 
+## The concept ledger (expository books)
+
+A bible is canon for a book with characters. A book with *jargon* has the same
+problem in a different shape — it uses a term before it teaches it — and the
+same answer: put the canon in a committed file and let a machine check the
+prose against it.
+
+`glossary.yaml` is that file. Every term the book teaches, the ONE definition it
+commits to, the ONE analogy it uses for that idea, the chapter that introduces
+it, and what a reader must already know:
+
+```yaml
+kind: technical
+title: "Prompt to Production"
+
+concepts:
+  - term: "idempotent"
+    aka: ["idempotence", "idempotency"]
+    definition: >-
+      Safe to repeat: running it twice leaves you in the same place as running
+      it once.
+    analogy: "A light switch labelled ON — pressing it again does not make the room brighter."
+    depends_on: ["declarative"]
+    defined_in: 8
+    scan: true
+```
+
+Two things are generated from it, so the definition exists in exactly one place:
+
+```bash
+bookkit check terms -b .                    # the gate — exits 8 on errors
+bookkit check terms -b . --ledger-only      # ledger consistency only, no prose
+bookkit check terms -b . --require-analogy  # audit which terms have no metaphor
+bookkit check terms -b . --strict           # treat warnings as failures too
+bookkit glossary -b .                       # → GLOSSARY.md, for back_matter
+```
+
+`check terms` catches jargon used before it is defined, a prerequisite that
+resolves to nothing or points backwards, two concepts claiming one name, and
+terms the ledger records that the book never says. A chapter that deliberately
+introduces no term — a closing checklist, an afterword — says so once with
+`teaches_no_terms: [15, 16]` rather than being asked about on every run.
+
+It is deliberately quiet: only distinctive names are scanned (ordinary English
+like "test" or "state" would make it noise), a *signposted* forward reference —
+"Containers (Chapter 7) package the program…" — is good writing rather than an
+error, and code, links and diagram markup are stripped before anything is
+matched.
+
+Full design and rule list: [`docs/ledger.md`](docs/ledger.md).
+
+## Sibling books (a series that reuses a method)
+
+A series that carries one method across volumes will reuse some prose with it,
+and some of that is right — the argument for computing rather than guessing does
+not change because the domain did. What is not right is a chapter a reader
+*recognises*: same shape, same sentences, the domain nouns swapped. The second
+reading then feels like a find-and-replace of the first, and the book that could
+have earned its own examples never does.
+
+That is measurable, so it need not be something a reader notices on volume two:
+
+```bash
+bookkit check duplication -b . --against ../sibling-book
+```
+
+Per chapter, how much of it has a near-twin anywhere in the sibling — every
+chapter is compared against every chapter, so one that has *moved* between
+volumes is still found. The comparison is deliberately literal, with no synonym
+table and no stemming: a sentence genuinely rewritten to say the same thing
+differently is exactly what this should stop reporting, so the number falls as
+soon as the work is done.
+
 ## LLM-agnostic
 
 Every AI-assisted command (`write outline`, `write chapter`) is provider-neutral. Pick a

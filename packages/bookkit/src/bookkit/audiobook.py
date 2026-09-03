@@ -48,6 +48,15 @@ _SENTENCE_RE = re.compile(r"(?<=[.!?…])[\"'”’)\]]*\s+")
 # --- Markdown → spoken prose -------------------------------------------------
 
 _CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+# An inline diagram is visual apparatus, exactly like a code listing: dropped
+# whole, rather than narrated. Without this a listener gets "div style margin
+# one point six rem, svg viewBox zero zero six eighty one twenty, xmlns http
+# colon slash slash www dot w3 dot org..." in the middle of a sentence.
+_SVG_BLOCK_RE = re.compile(r"<svg\b.*?</svg>", re.DOTALL | re.IGNORECASE)
+# Anything still carrying tags keeps its text and loses the markup, so a
+# caption or a hand-written <em> still reaches the narrator.
+_HTML_TAG_RE = re.compile(r"</?[A-Za-z][^>]*>")
 _IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 _HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+", re.MULTILINE)
@@ -56,17 +65,49 @@ _LIST_MARKER_RE = re.compile(r"^\s{0,3}(?:[-*+]|\d+[.)])\s+", re.MULTILINE)
 _HR_RE = re.compile(r"^\s{0,3}([-*_])(?:\s*\1){2,}\s*$", re.MULTILINE)
 _EMPHASIS_RE = re.compile(r"(\*{1,3}|_{1,3}|`+)(.+?)\1", re.DOTALL)
 _MULTI_BLANK_RE = re.compile(r"\n{3,}")
+# A Markdown table row, and the |---|---| rule that separates head from body.
+_TABLE_ROW_RE = re.compile(r"^\s{0,3}\|.*\|\s*$")
+_TABLE_RULE_RE = re.compile(r"^\s{0,3}\|(?:\s*:?-+:?\s*\|)+\s*$")
+
+
+def _table_to_speech(text: str) -> str:
+    """Turn Markdown table rows into sentences a narrator can actually read.
+
+    A table is a visual arrangement, but unlike a diagram its cells carry the
+    content itself -- a checklist of questions, a rule and its severity -- so
+    dropping it would lose the substance rather than the packaging. Each row
+    becomes its cells in order, comma-separated; the head/body rule carries no
+    words and is dropped. Without this the narrator reads the pipes.
+    """
+    out: list[str] = []
+    for line in text.split("\n"):
+        if _TABLE_RULE_RE.match(line):
+            continue
+        if _TABLE_ROW_RE.match(line):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            cells = [c for c in cells if c]
+            if not cells:
+                continue
+            row = ", ".join(cells)
+            out.append(row if row.endswith((".", "?", "!")) else row + ".")
+            continue
+        out.append(line)
+    return "\n".join(out)
 
 
 def markdown_to_speech(md: str) -> str:
     """Flatten Markdown prose into plain spoken text, preserving paragraphs.
 
     The goal is what a narrator would *say*, not what a reader would *see*:
-    formatting markers are removed, link text is kept (URLs dropped), images and
-    code fences are discarded, and paragraph breaks are preserved as blank lines
-    so the chunker can group sentences sensibly.
+    formatting markers are removed, link text is kept (URLs dropped), images,
+    code fences and inline diagrams are discarded, and paragraph breaks are
+    preserved as blank lines so the chunker can group sentences sensibly.
     """
     text = _CODE_FENCE_RE.sub("", md)
+    text = _HTML_COMMENT_RE.sub("", text)
+    text = _SVG_BLOCK_RE.sub("", text)
+    text = _HTML_TAG_RE.sub("", text)
+    text = _table_to_speech(text)
     text = _IMAGE_RE.sub("", text)
     text = _LINK_RE.sub(r"\1", text)
     text = _HR_RE.sub("", text)
@@ -316,6 +357,25 @@ def plan_audiobook(
 # --- Plan → podcastkit project -----------------------------------------------
 
 
+def _write_if_changed(path: Path, text: str, *, force: bool = False) -> bool:
+    """Write ``text`` to ``path`` unless it is already exactly that. Returns
+    whether anything was written.
+
+    Used for the files derived from the manuscript, where comparing content
+    rather than merely testing for existence is what keeps ``bookkit audiobook``
+    honest after an edit: skipping a file that is already there means a
+    corrected chapter regenerates to nothing, silently, and the stale script is
+    then rendered as though it were current — the same failure the voice-line
+    manifest exists to prevent, one stage earlier in the pipeline. Untouched
+    files are still left alone, so the command stays cheap and does not churn
+    timestamps for chapters nobody edited.
+    """
+    if not force and path.exists() and path.read_text(encoding="utf-8") == text:
+        return False
+    path.write_text(text, encoding="utf-8")
+    return True
+
+
 def write_project(plan: AudiobookPlan, dest: Path, *, force: bool = False) -> list[str]:
     """Write a podcastkit-compatible project tree under ``dest``.
 
@@ -339,30 +399,30 @@ def write_project(plan: AudiobookPlan, dest: Path, *, force: bool = False) -> li
         ep_dir = dest / episode.name
         ep_dir.mkdir(parents=True, exist_ok=True)
 
-        script_path = ep_dir / "script.json"
-        if force or not script_path.exists():
-            payload = [
-                {"id": line.id, "character": line.character, "text": line.text}
-                for line in episode.script
-            ]
-            # Validate against the shared audio-bridge contract *before* writing, so
-            # any drift between what bookkit emits and what podcastkit can render
-            # fails here — in this producer's own tests — not later at the consumer.
-            validate_script(payload)
-            script_path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-            )
+        payload = [
+            {"id": line.id, "character": line.character, "text": line.text}
+            for line in episode.script
+        ]
+        # Validate against the shared audio-bridge contract *before* writing, so
+        # any drift between what bookkit emits and what podcastkit can render
+        # fails here — in this producer's own tests — not later at the consumer.
+        validate_script(payload)
+        script_text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+        if _write_if_changed(ep_dir / "script.json", script_text, force=force):
             written.append(f"{episode.name}/script.json")
 
+        doc = {
+            "title": episode.title or episode.name,
+            "output": episode.output,
+            "voices": plan.voices,
+            "timeline": episode.timeline,
+        }
+        validate_episode(doc)  # same contract the renderer loads — see above
+        # episode.yaml is different in kind: it is the cast sheet, and an author
+        # is expected to hand-tune it (a real voice per character). It is left
+        # alone once it exists, and only --force overwrites it.
         episode_path = ep_dir / "episode.yaml"
         if force or not episode_path.exists():
-            doc = {
-                "title": episode.title or episode.name,
-                "output": episode.output,
-                "voices": plan.voices,
-                "timeline": episode.timeline,
-            }
-            validate_episode(doc)  # same contract the renderer loads — see above
             episode_path.write_text(
                 yaml.dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8"
             )

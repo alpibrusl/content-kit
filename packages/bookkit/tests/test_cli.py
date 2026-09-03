@@ -159,3 +159,92 @@ def test_build_missing_chapter_file(tmp_book: Path) -> None:
     assert result.exit_code == 8  # PRECONDITION_FAILED
     payload = json.loads(result.stdout)
     assert payload["error"]["code"] == "PRECONDITION_FAILED"
+
+
+# --- check terms / glossary ------------------------------------------------
+
+_LEDGER = """
+kind: technical
+title: Test Book
+concepts:
+  - term: idempotent
+    definition: Safe to repeat.
+    analogy: A light switch labelled ON.
+    defined_in: 2
+    scan: true
+"""
+
+
+def _ledger_book(tmp_book: Path, ledger: str = _LEDGER) -> Path:
+    (tmp_book / "glossary.yaml").write_text(ledger, encoding="utf-8")
+    return tmp_book
+
+
+def test_check_terms_clean(tmp_book: Path) -> None:
+    book = _ledger_book(tmp_book)
+    (book / "chapters" / "02-method.md").write_text(
+        "# First Principles\n\nAn idempotent step is safe to repeat.\n", encoding="utf-8"
+    )
+    result = runner.invoke(app, ["check", "terms", "-b", str(book)])
+    assert result.exit_code == 0, result.stdout
+    assert "0 error(s)" in result.stdout
+
+
+def test_check_terms_flags_early_use_exit_8(tmp_book: Path) -> None:
+    book = _ledger_book(tmp_book)
+    (book / "chapters" / "01-intro.md").write_text(
+        "# Introduction\n\nThe retry is idempotent, which matters.\n", encoding="utf-8"
+    )
+    result = runner.invoke(app, ["check", "terms", "-b", str(book)])
+    assert result.exit_code == 8  # PRECONDITION_FAILED
+    assert "term-used-before-defined" in result.stdout
+
+
+def test_check_terms_strict_promotes_warnings(tmp_book: Path) -> None:
+    book = _ledger_book(tmp_book)
+    result = runner.invoke(app, ["check", "terms", "-b", str(book), "--strict"])
+    assert result.exit_code == 8
+    result = runner.invoke(app, ["check", "terms", "-b", str(book)])
+    assert result.exit_code == 0, result.stdout
+
+
+def test_check_terms_ledger_only_skips_prose(tmp_book: Path) -> None:
+    book = _ledger_book(tmp_book)
+    (book / "chapters" / "01-intro.md").write_text(
+        "# Introduction\n\nThe retry is idempotent, which matters.\n", encoding="utf-8"
+    )
+    result = runner.invoke(app, ["check", "terms", "-b", str(book), "--ledger-only"])
+    assert result.exit_code == 0, result.stdout
+    assert "the ledger only" in result.stdout
+
+
+def test_check_terms_json_envelope(tmp_book: Path) -> None:
+    book = _ledger_book(tmp_book)
+    result = runner.invoke(app, ["check", "terms", "-b", str(book), "-o", "json"])
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["data"]["concepts"] == 1
+
+
+def test_check_terms_without_a_ledger_exits_3(tmp_book: Path) -> None:
+    result = runner.invoke(app, ["check", "terms", "-b", str(tmp_book)])
+    assert result.exit_code == 3  # NOT_FOUND
+
+
+def test_glossary_writes_back_matter(tmp_book: Path) -> None:
+    book = _ledger_book(tmp_book)
+    result = runner.invoke(app, ["glossary", "-b", str(book)])
+    assert result.exit_code == 0, result.stdout
+    generated = (book / "GLOSSARY.md").read_text(encoding="utf-8")
+    assert "# Glossary" in generated
+    assert "**idempotent** *(ch. 2)*" in generated
+
+
+def test_glossary_honours_out_and_title(tmp_book: Path, tmp_path: Path) -> None:
+    book = _ledger_book(tmp_book)
+    dest = tmp_path / "nested" / "TERMS.md"
+    result = runner.invoke(
+        app, ["glossary", "-b", str(book), "--out", str(dest), "--title", "Terms"]
+    )
+    assert result.exit_code == 0, result.stdout
+    assert dest.read_text(encoding="utf-8").startswith("# Terms")
