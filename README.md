@@ -43,7 +43,7 @@ pip install -e ./packages/core \
 
 ruff check packages && ruff format --check packages
 lint-imports                       # the dependency-arrow contracts
-pytest packages/core packages/bookkit packages/podcastkit
+pytest                             # every package, one run
 ```
 
 ### Driving the toolchain from an agent
