@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import yaml
 
-from bookkit._html import _copyright_page, iter_front_matter
+from bookkit._html import _copyright_page, default_css, iter_front_matter
 from bookkit.config import BookConfig
 
 
@@ -142,7 +142,10 @@ def test_a_front_matter_file_renders_before_the_chapters(tmp_book) -> None:
 
     html = build_document(config, chapters, tmp_book)
     assert "Four books, one argument." in html
-    assert html.index("Four books, one argument.") < html.index("first")
+    # Chapter 1's own body, not the bare word "first" -- the stylesheet has an
+    # `@page :first` rule, and matching that would pass no matter where the
+    # front matter landed.
+    assert html.index("Four books, one argument.") < html.index("It has two sentences.")
 
 
 def test_front_matter_files_are_separate_epub_documents(tmp_book) -> None:
@@ -175,7 +178,9 @@ def test_a_flat_book_renders_exactly_as_before(tmp_book) -> None:
     """No parts declared: one ordered list, no part markers at all."""
     config = BookConfig.model_validate(yaml.safe_load((tmp_book / "book.yaml").read_text()))
     html = build_document(config, load_chapters(config, tmp_book), tmp_book)
-    assert "toc-part" not in html
+    # The class attribute, not the bare string -- the stylesheet always carries
+    # a rule for it, and that says nothing about what the body rendered.
+    assert 'class="toc-part"' not in html
 
 
 def test_a_part_groups_every_chapter_until_the_next_one(tmp_book) -> None:
@@ -186,3 +191,20 @@ def test_a_part_groups_every_chapter_until_the_next_one(tmp_book) -> None:
     html = build_document(config, load_chapters(config, tmp_book), tmp_book)
     assert html.count('class="toc-part"') == 1
     assert "First Principles" in html
+
+
+def test_the_page_margin_boxes_use_the_same_face_as_the_body(tmp_book) -> None:
+    """Margin boxes inherit from the page context, not from body.
+
+    Without an explicit declaration the running header and every page number
+    render in the reader's default font while the text is set in the embedded
+    book face -- a mismatch on every page of the book.
+    """
+    config = BookConfig.model_validate(yaml.safe_load((tmp_book / "book.yaml").read_text()))
+    css = default_css(config)
+
+    page_block = css[css.index("@page {") : css.index("@page :first")]
+    body_block = css[css.index("body {") : css.index("h1, h2, h3")]
+    assert "font-family" in page_block
+    stack = page_block.split("font-family:")[1].split(";")[0].strip()
+    assert stack == body_block.split("font-family:")[1].split(";")[0].strip()

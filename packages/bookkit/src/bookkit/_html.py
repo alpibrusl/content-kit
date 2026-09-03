@@ -79,6 +79,10 @@ def default_css(config: BookConfig) -> str:
 @page {{
   size: {page};
   margin: 22mm 16mm 20mm;
+  /* Margin boxes inherit from the page context, not from body, so without
+     this the running header and every page number render in the reader's
+     default font while the text is set in the embedded book face. */
+  font-family: {font};
   @top-center {{
     content: string(chaptertitle);
     font-size: 8pt;
@@ -123,7 +127,15 @@ section.cover img {{ width: 100%; display: block; }}
 .copyright .notice {{ font-size: 0.85em; }}
 nav.toc {{ text-align: left; }}
 nav.toc ol {{ list-style: none; padding: 0; }}
+nav.toc ol ol {{ padding-left: 1.2em; }}
 nav.toc li {{ margin: 0.5rem 0; }}
+nav.toc li.toc-part {{
+  margin: 1.6rem 0 0.6rem;
+  font-variant-caps: small-caps;
+  letter-spacing: 0.06em;
+  color: #555;
+}}
+nav.toc li.toc-part:first-child {{ margin-top: 0; }}
 nav.toc a {{ text-decoration: none; color: #1a1a1a; }}
 nav.toc a::after {{
   content: leader(".") target-counter(attr(href), page);
