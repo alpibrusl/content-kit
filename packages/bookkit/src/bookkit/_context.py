@@ -8,9 +8,13 @@ layers to plain text and locates the per-chapter source/recap files.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+import yaml
+
 from .bible import BibleConfig
+from .config import BookConfig
 
 
 def bible_to_prompt_text(bible: BibleConfig, upto_chapter: int | None = None) -> str:
@@ -64,10 +68,6 @@ def find_chapter_file(book_dir: Path, chapter_num: int) -> Path | None:
     """Locate a chapter's Markdown source, by book.yaml order or NN-* glob."""
     book_yaml = book_dir / "book.yaml"
     if book_yaml.exists():
-        import yaml
-
-        from .config import BookConfig
-
         raw = yaml.safe_load(book_yaml.read_text(encoding="utf-8")) or {}
         config = BookConfig.model_validate(raw)
         if 1 <= chapter_num <= len(config.chapters):
@@ -100,3 +100,33 @@ def prev_chapter_text(book_dir: Path, chapter_num: int, *, max_chars: int = 1200
         return ""
     text = path.read_text(encoding="utf-8").strip()
     return text[:max_chars]
+
+
+def read_chapters(book_dir: Path, config: BookConfig | None = None) -> dict[int, str]:
+    """Every chapter's Markdown source, keyed by chapter number.
+
+    Numbering follows the filename's leading digits when it has them, because
+    that is the number the prose itself refers to ("see Chapter 7") and the
+    number a ledger's ``defined_in`` means. Falling back to position in
+    ``book.yaml`` keeps this working for books that don't number their files.
+    A book with no ``book.yaml`` is read straight from ``chapters/``.
+    """
+    book_yaml = book_dir / "book.yaml"
+    if config is None and book_yaml.exists():
+        raw = yaml.safe_load(book_yaml.read_text(encoding="utf-8")) or {}
+        config = BookConfig.model_validate(raw)
+    if config is not None:
+        entries = [c.file for c in config.chapters]
+    else:
+        found = sorted((book_dir / "chapters").glob("*.md"))
+        entries = [str(p.relative_to(book_dir)) for p in found]
+
+    out: dict[int, str] = {}
+    for index, entry in enumerate(entries, start=1):
+        path = book_dir / entry
+        if not path.exists():
+            continue
+        match = re.match(r"^(\d+)-", path.name)
+        number = int(match.group(1)) if match else index
+        out[number] = path.read_text(encoding="utf-8")
+    return out
