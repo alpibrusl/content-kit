@@ -124,8 +124,28 @@ def _copyright_page(config: BookConfig) -> str:
 
 
 def _toc(config: BookConfig, chapters: list[Chapter]) -> str:
+    """The table of contents, grouped by part when the book declares any.
+
+    A book with no parts renders exactly as before: one flat ordered list.
+    """
     heading = labels_for(config.language)["contents"]
-    items = "\n".join(f'<li><a href="#{c.id}">{_esc(c.title)}</a></li>' for c in chapters)
+    parts = [entry.part for entry in config.chapters]
+
+    lines: list[str] = []
+    open_list = False
+    padded = parts + [""] * len(chapters)
+    for chapter, part in zip(chapters, padded, strict=False):
+        if part:
+            if open_list:
+                lines.append("</ol>")
+            lines.append(f'<li class="toc-part">{_esc(part)}</li>')
+            lines.append("<ol>")
+            open_list = True
+        lines.append(f'<li><a href="#{chapter.id}">{_esc(chapter.title)}</a></li>')
+    if open_list:
+        lines.append("</ol>")
+
+    items = "\n".join(lines)
     return (
         '<section class="front-matter toc">\n<nav class="toc">\n'
         f"<h1>{_esc(heading)}</h1>\n<ol>\n"
