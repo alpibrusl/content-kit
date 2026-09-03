@@ -155,3 +155,34 @@ def test_front_matter_files_are_separate_epub_documents(tmp_book) -> None:
     titles = [t for _, t, _ in docs]
     assert "Preface" in titles
     assert any("Read this first." in html for _, _, html in docs)
+
+
+def test_toc_groups_by_part_when_the_book_declares_them(tmp_book) -> None:
+    raw = yaml.safe_load((tmp_book / "book.yaml").read_text())
+    raw["chapters"][0]["part"] = "Part I — The Ground"
+    raw["chapters"][1]["part"] = "Part II — Keeping It"
+    config = BookConfig.model_validate(raw)
+    chapters = load_chapters(config, tmp_book)
+
+    html = build_document(config, chapters, tmp_book)
+    assert "Part I — The Ground" in html
+    assert "Part II — Keeping It" in html
+    assert html.index("Part I — The Ground") < html.index("Part II — Keeping It")
+    assert html.count('class="toc-part"') == 2
+
+
+def test_a_flat_book_renders_exactly_as_before(tmp_book) -> None:
+    """No parts declared: one ordered list, no part markers at all."""
+    config = BookConfig.model_validate(yaml.safe_load((tmp_book / "book.yaml").read_text()))
+    html = build_document(config, load_chapters(config, tmp_book), tmp_book)
+    assert "toc-part" not in html
+
+
+def test_a_part_groups_every_chapter_until_the_next_one(tmp_book) -> None:
+    """The name sits on the chapter that opens the part, not on all of them."""
+    raw = yaml.safe_load((tmp_book / "book.yaml").read_text())
+    raw["chapters"][0]["part"] = "Part I"
+    config = BookConfig.model_validate(raw)
+    html = build_document(config, load_chapters(config, tmp_book), tmp_book)
+    assert html.count('class="toc-part"') == 1
+    assert "First Principles" in html

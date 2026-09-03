@@ -51,6 +51,14 @@ class Copyright(BaseModel):
 class ChapterEntry(BaseModel):
     file: str  # path to the chapter's Markdown source, relative to the book directory
     title: str = ""  # overrides the chapter's leading "# Heading" when set
+    part: str = ""
+    """The part this chapter *opens*, named on that chapter only.
+
+    A book divided into parts is easier to navigate than a flat list of
+    sixteen chapters, and the division is structure rather than prose: set it
+    here and the table of contents groups by it. Carried on the opening
+    chapter rather than as a separate list so a chapter cannot end up in two
+    parts, or in none."""
 
 
 class MatterEntry(BaseModel):
