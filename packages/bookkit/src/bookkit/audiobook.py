@@ -418,13 +418,32 @@ def write_project(plan: AudiobookPlan, dest: Path, *, force: bool = False) -> li
             "timeline": episode.timeline,
         }
         validate_episode(doc)  # same contract the renderer loads — see above
-        # episode.yaml is different in kind: it is the cast sheet, and an author
-        # is expected to hand-tune it (a real voice per character). It is left
-        # alone once it exists, and only --force overwrites it.
+        # episode.yaml carries two things with opposite requirements. `voices` is
+        # the cast sheet an author hand-tunes and must survive regeneration.
+        # `timeline` is derived from the script and must follow it: preserving
+        # the whole file meant that deleting a paragraph left its id in the
+        # timeline, so `assemble` went on splicing in audio for a line the
+        # manuscript no longer had -- a chapter that narrated prose its own book
+        # had cut, with nothing anywhere reporting it.
         episode_path = ep_dir / "episode.yaml"
         if force or not episode_path.exists():
             episode_path.write_text(
                 yaml.dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8"
             )
             written.append(f"{episode.name}/episode.yaml")
+        else:
+            existing = yaml.safe_load(episode_path.read_text(encoding="utf-8")) or {}
+            merged = dict(existing)
+            merged["timeline"] = doc["timeline"]
+            # A character the manuscript introduced since the last run needs a
+            # voice; one the author has already cast keeps theirs.
+            cast = dict(doc["voices"])
+            cast.update(existing.get("voices") or {})
+            merged["voices"] = cast
+            if merged != existing:
+                validate_episode(merged)
+                episode_path.write_text(
+                    yaml.dump(merged, allow_unicode=True, sort_keys=False), encoding="utf-8"
+                )
+                written.append(f"{episode.name}/episode.yaml")
     return written
