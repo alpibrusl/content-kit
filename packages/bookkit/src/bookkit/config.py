@@ -72,7 +72,14 @@ class BookConfig(BaseModel):
     series: str = ""  # optional path to a series.yaml (relative to the book dir)
     theme: Theme = Theme()
     chapters: list[ChapterEntry]  # ordered, like an episode timeline
-    front_matter: list[Literal["title_page", "copyright", "toc"]] = ["title_page", "toc"]
+    front_matter: list[Literal["title_page", "copyright", "toc"] | MatterEntry] = [
+        "title_page",
+        "toc",
+    ]
+    """Ordered front matter. Takes the same file entries as ``back_matter``, so a
+    preface, a series map or a note on how to read the book can open it — the
+    asymmetry that only back matter could carry a file was an accident, and it
+    stranded material a reader needs *before* chapter 1 at the end of the book."""
     # Built-in sections by keyword ("about_author") and/or Markdown files
     # ({file: COLOPHON.md, title: Colophon}), rendered in list order.
     back_matter: list[Literal["about_author"] | MatterEntry] = []

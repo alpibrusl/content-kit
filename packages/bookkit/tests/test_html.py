@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from bookkit._html import _copyright_page
+import yaml
+
+from bookkit._html import _copyright_page, iter_front_matter
 from bookkit.config import BookConfig
 
 
@@ -121,3 +123,35 @@ def test_back_matter_file_entry_renders_as_section(tmp_book) -> None:
     assert "<em>bookkit</em>" in html
     # order respected: file entry before about_author
     assert html.index("Colofón") < html.index("About the Author")
+
+
+def test_a_front_matter_file_renders_before_the_chapters(tmp_book) -> None:
+    """The point of the feature: it has to land ahead of chapter 1, not after."""
+    (tmp_book / "PREFACE.md").write_text(
+        "# How to read this\n\nFour books, one argument.\n", encoding="utf-8"
+    )
+    raw = yaml.safe_load((tmp_book / "book.yaml").read_text())
+    raw["front_matter"] = [
+        "title_page",
+        {"file": "PREFACE.md", "title": "How to read this"},
+        "toc",
+    ]
+    (tmp_book / "book.yaml").write_text(yaml.dump(raw), encoding="utf-8")
+    config = BookConfig.model_validate(raw)
+    chapters = load_chapters(config, tmp_book)
+
+    html = build_document(config, chapters, tmp_book)
+    assert "Four books, one argument." in html
+    assert html.index("Four books, one argument.") < html.index("first")
+
+
+def test_front_matter_files_are_separate_epub_documents(tmp_book) -> None:
+    (tmp_book / "PREFACE.md").write_text("# Preface\n\nRead this first.\n", encoding="utf-8")
+    raw = yaml.safe_load((tmp_book / "book.yaml").read_text())
+    raw["front_matter"] = ["title_page", {"file": "PREFACE.md", "title": "Preface"}]
+    config = BookConfig.model_validate(raw)
+
+    docs = iter_front_matter(config, tmp_book)
+    titles = [t for _, t, _ in docs]
+    assert "Preface" in titles
+    assert any("Read this first." in html for _, _, html in docs)

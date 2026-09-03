@@ -64,7 +64,7 @@ class EpubRenderer(Renderer):
         # Front matter (title page, copyright) precedes the nav in reading order;
         # it is intentionally kept out of the TOC, which lists the chapters.
         spine: list = []
-        for slug, title, content in iter_front_matter(config):
+        for slug, title, content in iter_front_matter(config, book_dir):
             spine.append(make_item(slug, title, content))
         spine.append("nav")
 

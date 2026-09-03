@@ -177,13 +177,22 @@ def _matter_file_section(entry: MatterEntry, book_dir: Path) -> tuple[str, str, 
     return slug, title, section
 
 
-def front_matter_sections(config: BookConfig, chapters: list[Chapter]) -> list[str]:
+def front_matter_sections(
+    config: BookConfig, chapters: list[Chapter], book_dir: Path | None = None
+) -> list[str]:
     builders = {
         "title_page": lambda: _title_page(config),
         "copyright": lambda: _copyright_page(config),
         "toc": lambda: _toc(config, chapters),
     }
-    return [builders[name]() for name in config.front_matter if name in builders]
+    out = []
+    for entry in config.front_matter:
+        if isinstance(entry, MatterEntry):
+            if book_dir is not None:
+                out.append(_matter_file_section(entry, book_dir)[2])
+        elif entry in builders:
+            out.append(builders[entry]())
+    return out
 
 
 def back_matter_sections(config: BookConfig, book_dir: Path) -> list[str]:
@@ -198,7 +207,9 @@ def back_matter_sections(config: BookConfig, book_dir: Path) -> list[str]:
     return out
 
 
-def iter_front_matter(config: BookConfig) -> list[tuple[str, str, str]]:
+def iter_front_matter(
+    config: BookConfig, book_dir: Path | None = None
+) -> list[tuple[str, str, str]]:
     """Front matter as discrete ``(slug, title, html)`` documents.
 
     For renderers that paginate into separate files (EPUB). The ``toc`` section
@@ -211,9 +222,12 @@ def iter_front_matter(config: BookConfig) -> list[tuple[str, str, str]]:
         "copyright": ("copyright", labels["copyright"], lambda: _copyright_page(config)),
     }
     docs = []
-    for name in config.front_matter:
-        if name in builders:
-            slug, title, build = builders[name]
+    for entry in config.front_matter:
+        if isinstance(entry, MatterEntry):
+            if book_dir is not None:
+                docs.append(_matter_file_section(entry, book_dir))
+        elif entry in builders:
+            slug, title, build = builders[entry]
             docs.append((slug, title, build()))
     return docs
 
@@ -254,7 +268,7 @@ def build_document(config: BookConfig, chapters: list[Chapter], book_dir: Path) 
     cover = _cover_section(config, book_dir)
     body_sections = [
         *([cover] if cover else []),
-        *front_matter_sections(config, chapters),
+        *front_matter_sections(config, chapters, book_dir),
         *(chapter_section(c) for c in chapters),
         *back_matter_sections(config, book_dir),
     ]
