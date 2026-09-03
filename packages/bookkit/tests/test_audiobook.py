@@ -210,25 +210,60 @@ def test_write_project_emits_podcastkit_layout(tmp_path):
     assert episode["voices"]["NARRATOR"]["backend"] == "kokoro"
 
 
-def test_write_project_preserves_existing_unless_forced(tmp_path):
-    config = _make_book(tmp_path, [("chapters/01.md", "Hello world.")])
-    plan = plan_audiobook(config, tmp_path)
+def test_write_project_preserves_the_cast_but_refreshes_the_timeline(tmp_path):
+    """episode.yaml carries two things with opposite requirements.
+
+    `voices` is the cast sheet an author hand-tunes and must survive
+    regeneration. `timeline` is derived from the script and must follow it:
+    preserving the whole file meant deleting a paragraph left its id in the
+    timeline, and `assemble` went on splicing in audio for a line the
+    manuscript no longer had.
+    """
+    config = _make_book(
+        tmp_path, [("chapters/01.md", "First para.\n\nSecond para.\n\nThird para.")]
+    )
     dest = tmp_path / "out"
-    write_project(plan, dest)
+    write_project(plan_audiobook(config, tmp_path), dest)
 
-    # Author hand-tunes the episode (casts a real voice).
     ep_path = dest / "chapter_01" / "episode.yaml"
-    ep_path.write_text("title: tuned\n", encoding="utf-8")
+    doc = yaml.safe_load(ep_path.read_text(encoding="utf-8"))
+    before = len(doc["timeline"])
+    # the author casts a real voice
+    doc["voices"]["NARRATOR"]["voice_id"] = "a-real-voice"
+    ep_path.write_text(yaml.dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
-    # Re-run without force: untouched.
-    written = write_project(plan, dest)
+    # the manuscript loses a paragraph
+    (tmp_path / "chapters" / "01.md").write_text("First para.\n\nSecond para.", encoding="utf-8")
+    write_project(plan_audiobook(config, tmp_path), dest)
+
+    after = yaml.safe_load(ep_path.read_text(encoding="utf-8"))
+    assert after["voices"]["NARRATOR"]["voice_id"] == "a-real-voice", "the cast must survive"
+    assert len(after["timeline"]) < before, "the timeline must follow the script"
+    script = json.loads((dest / "chapter_01" / "script.json").read_text(encoding="utf-8"))
+    assert [t["id"] for t in after["timeline"]] == [line["id"] for line in script]
+
+
+def test_an_unchanged_episode_is_not_rewritten(tmp_path):
+    config = _make_book(tmp_path, [("chapters/01.md", "First para.\n\nSecond para.")])
+    dest = tmp_path / "out"
+    write_project(plan_audiobook(config, tmp_path), dest)
+    written = write_project(plan_audiobook(config, tmp_path), dest)
     assert "chapter_01/episode.yaml" not in written
-    assert ep_path.read_text(encoding="utf-8") == "title: tuned\n"
 
-    # With force: overwritten.
-    written = write_project(plan, dest, force=True)
+
+def test_force_overwrites_the_cast_too(tmp_path):
+    config = _make_book(tmp_path, [("chapters/01.md", "First para.\n\nSecond para.")])
+    dest = tmp_path / "out"
+    write_project(plan_audiobook(config, tmp_path), dest)
+    ep_path = dest / "chapter_01" / "episode.yaml"
+    doc = yaml.safe_load(ep_path.read_text(encoding="utf-8"))
+    doc["voices"]["NARRATOR"]["voice_id"] = "a-real-voice"
+    ep_path.write_text(yaml.dump(doc, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+    written = write_project(plan_audiobook(config, tmp_path), dest, force=True)
     assert "chapter_01/episode.yaml" in written
-    assert "tuned" not in ep_path.read_text(encoding="utf-8")
+    after = yaml.safe_load(ep_path.read_text(encoding="utf-8"))
+    assert after["voices"]["NARRATOR"]["voice_id"] != "a-real-voice"
 
 
 def test_write_project_unicode_roundtrip(tmp_path):
