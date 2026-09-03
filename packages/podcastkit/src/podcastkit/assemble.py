@@ -353,12 +353,20 @@ def assemble(
     episode_dir: Path,
     config: EpisodeConfig,
     log: Callable[..., None] = print,
+    keep_intermediate: bool = False,
 ) -> dict[str, Any]:
     """Run the full two-pass assembly pipeline for an episode.
 
     Pass 1: concatenate voice lines with silence into a WAV track.
     Pass 2: mix in background tracks and SFX hits, encode to MP3.
     Returns a dict with output filename, duration, size, and loudness.
+
+    Pass 1's uncompressed ``build/voices_track.wav`` is scratch: nothing reads
+    it once the MP3 exists, and it is roughly seven times the size of the
+    finished episode -- a 17-chapter book leaves two gigabytes of it behind. It
+    is deleted on success unless ``keep_intermediate`` is set, which is worth
+    doing when debugging a mix, and always kept when assembly fails so there is
+    something to inspect.
     """
     if shutil.which("ffmpeg") is None:
         sys.exit("ERROR: ffmpeg not on PATH. Install it and retry.")
@@ -369,6 +377,25 @@ def assemble(
     mix_overlays(episode_dir, config, anchors, log=log)
     output_path = episode_dir / config.output
     result = verify(output_path, log=log)
+
+    if not keep_intermediate:
+        freed = discard_intermediate(episode_dir)
+        if freed:
+            log(f"  freed {freed / 1024 / 1024:.0f} MB of intermediate audio")
+
     log("")
     log(f"Done. Open {output_path} to listen.")
     return result
+
+
+def discard_intermediate(episode_dir: Path) -> int:
+    """Remove pass 1's scratch WAV. Returns the bytes reclaimed."""
+    voices_track = episode_dir / "build" / "voices_track.wav"
+    if not voices_track.exists():
+        return 0
+    size = voices_track.stat().st_size
+    voices_track.unlink()
+    build_dir = voices_track.parent
+    if not any(build_dir.iterdir()):
+        build_dir.rmdir()
+    return size

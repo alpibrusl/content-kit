@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,40 @@ KOKORO_SAMPLE_RATE = 24000
 
 # Cache one KPipeline per language prefix ('a' for American, 'b' for British).
 _pipelines: dict[str, Any] = {}
+
+# espeak-ng stores its data directory in a fixed-size buffer (N_PATH_HOME, 160
+# bytes). Given a longer path it does not complain -- it silently falls back to
+# the directory baked in when the binary was built, which for the espeakng-loader
+# wheel is a path on its CI runner. See _check_espeak_path.
+_ESPEAK_MAX_PATH = 160
+
+
+def _check_espeak_path() -> None:
+    """Fail early, and legibly, when espeak-ng cannot see its own data.
+
+    The symptom is one of the least helpful error messages in this toolchain::
+
+        Error processing file '/Users/runner/work/espeakng-loader/.../phontab':
+        No such file or directory.
+
+    Nothing is wrong with the installation and that directory was never on this
+    machine: espeak-ng truncated a too-long data path and fell back to its
+    build-time default. It happens when the virtualenv sits deep in the
+    filesystem, and the fix is a shorter path -- so say that, rather than
+    letting someone go looking for a package that isn't broken.
+    """
+    try:
+        import espeakng_loader
+    except ImportError:
+        return  # a system espeak-ng is in use; nothing to check
+    data = str(espeakng_loader.get_data_path())
+    if len(data) <= _ESPEAK_MAX_PATH or "ESPEAK_DATA_PATH" in os.environ:
+        return
+    raise RuntimeError(
+        f"espeak-ng's data directory is {len(data)} characters long, over the "
+        f"{_ESPEAK_MAX_PATH}-character limit it can store, so it will silently "
+        "read a non-existent build-time path instead and fail to phonemize.",
+    )
 
 
 def _get_pipeline(voice_name: str) -> Any:
@@ -27,6 +62,7 @@ def _get_pipeline(voice_name: str) -> Any:
             "Kokoro is not installed. Install the kokoro extra: pip install 'podcastkit[kokoro]'"
         ) from exc
 
+    _check_espeak_path()
     lang = voice_name[0]  # 'a' for af_/am_, 'b' for bf_/bm_
     if lang not in _pipelines:
         _pipelines[lang] = KPipeline(lang_code=lang)
