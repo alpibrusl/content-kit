@@ -208,3 +208,19 @@ def test_the_page_margin_boxes_use_the_same_face_as_the_body(tmp_book) -> None:
     assert "font-family" in page_block
     stack = page_block.split("font-family:")[1].split(";")[0].strip()
     assert stack == body_block.split("font-family:")[1].split(";")[0].strip()
+
+
+def test_the_running_head_is_suppressed_on_a_chapter_opening_page(tmp_book) -> None:
+    """`string(..., first-except)`, not a bare `string(...)`.
+
+    A chapter's opening page already prints the title two inches down, and a
+    running head repeating it is the thing book typography drops. Named page
+    groups cannot express this in WeasyPrint -- it reads `:first` as the first
+    page of the document rather than of the group -- so this one keyword is
+    what the behaviour rests on.
+    """
+    config = BookConfig.model_validate(yaml.safe_load((tmp_book / "book.yaml").read_text()))
+    css = default_css(config)
+
+    top_center = css[css.index("@top-center") : css.index("@bottom-center")]
+    assert "string(chaptertitle, first-except)" in top_center
