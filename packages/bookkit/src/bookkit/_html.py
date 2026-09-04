@@ -84,7 +84,14 @@ def default_css(config: BookConfig) -> str:
      default font while the text is set in the embedded book face. */
   font-family: {font};
   @top-center {{
-    content: string(chaptertitle);
+    /* `first-except` yields the empty string on the page where the string is
+       set, which is the chapter's own opening page -- where the title is
+       already printed two inches down and a running head repeating it is the
+       thing book typography drops. Continuation pages carry it normally.
+       Named page groups cannot do this: WeasyPrint reads `:first` as the
+       first page of the document, not of the group, so `@page chapter:first`
+       suppresses only the first chapter's opener however the names alternate. */
+    content: string(chaptertitle, first-except);
     font-size: 8pt;
     letter-spacing: 0.08em;
     text-transform: uppercase;
