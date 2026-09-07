@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from content_kit_core.ledger import Concept, LedgerConfig
 
+from ._labels import labels_for
+
 
 def _flatten(text: str) -> str:
     """Collapse the folded YAML scalars a ledger is written in to one line."""
@@ -22,24 +24,31 @@ def _flatten(text: str) -> str:
 def render_glossary(
     ledger: LedgerConfig,
     *,
-    title: str = "Glossary",
+    title: str | None = None,
     intro: str | None = None,
+    language: str = "en",
 ) -> str:
-    """Render a ledger as the book's back-matter glossary, sorted by term."""
+    """Render a ledger as the book's back-matter glossary, sorted by term.
+
+    Every string the generator supplies -- the heading, the standfirst, the
+    chapter abbreviation and "also called" -- follows ``language``. A Spanish
+    book whose glossary says "also called" against every entry is the engine
+    leaking into the book, which is the whole reason ``_labels`` exists.
+    """
     concepts: list[Concept] = sorted(ledger.concepts, key=lambda c: c.term.lower())
+    labels = labels_for(language)
+    if title is None:
+        title = labels["glossary"]
     if intro is None:
-        intro = (
-            "Every term this book teaches, with the definition it commits to.\n"
-            "The chapter number is where the term is introduced."
-        )
+        intro = labels["glossary_intro"]
 
     lines = [f"# {title}", "", intro, ""]
     for c in concepts:
         entry = f"**{c.term}**"
         if c.defined_in:
-            entry += f" *(ch. {c.defined_in})*"
+            entry += f" *({labels['chapter_abbrev']} {c.defined_in})*"
         if c.aka:
-            entry += f" — also called {', '.join(c.aka)}"
+            entry += f" — {labels['also_called']} {', '.join(c.aka)}"
         lines.append(entry)
         lines.append("")
         lines.append(f": {_flatten(c.definition)}")
