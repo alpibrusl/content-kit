@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "content-kit-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "Shared spine of the content platform — CLI conventions, LLM-agnostic writers, and the cross-tool bridge contracts (episode, storyboard, bible)"
 license = "EUPL-1.2"
 requires-python = ">=3.10"
