@@ -782,7 +782,11 @@ def cmd_glossary(
     out: Path = typer.Option(
         None, "--out", help="Where to write the glossary. Default: <book-dir>/GLOSSARY.md."
     ),
-    title: str = typer.Option("Glossary", "--title", help="Heading for the generated section."),
+    title: str = typer.Option(
+        None,
+        "--title",
+        help="Heading for the generated section. Default: the book's language's word for it.",
+    ),
     output: OutputFormat = typer.Option(
         OutputFormat.text, "--output", "-o", help="Output format (text|json)."
     ),
@@ -793,9 +797,18 @@ def cmd_glossary(
     bdir = book_dir.resolve()
     led = _load_ledger_file(bdir, ledger, cmd, output)
 
+    # The book's own language decides the generated headings. Falls back to
+    # English when there is no book.yaml to ask -- `glossary` is usable on a
+    # bare ledger, and a missing config is not an error here.
+    language = "en"
+    book_yaml = bdir / "book.yaml"
+    if book_yaml.exists():
+        raw = yaml.safe_load(book_yaml.read_text(encoding="utf-8")) or {}
+        language = raw.get("language") or "en"
+
     destination = out if out is not None else bdir / "GLOSSARY.md"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(render_glossary(led, title=title), encoding="utf-8")
+    destination.write_text(render_glossary(led, title=title, language=language), encoding="utf-8")
 
     data = {"path": str(destination), "terms": len(led.concepts)}
     if output == OutputFormat.text:
