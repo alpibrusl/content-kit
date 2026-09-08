@@ -14,6 +14,8 @@ import mimetypes
 import re
 from pathlib import Path
 
+from content_kit_core.provenance import build_stamp
+
 from ._labels import labels_for
 from ._manuscript import Chapter, render_markdown, slugify, split_title
 from .config import BookConfig, MatterEntry
@@ -132,6 +134,15 @@ section.cover img {{ width: 100%; display: block; }}
 .copyright p {{ text-align: center; }}
 .copyright .license {{ margin-top: 1.5rem; }}
 .copyright .notice {{ font-size: 0.85em; }}
+/* The build stamp is reference matter, not reading matter: findable when
+   somebody needs to rebuild this exact artifact, and quiet otherwise. */
+.copyright .build-stamp {{
+  margin-top: 2rem;
+  font-family: {_FONT_STACKS["mono"]};
+  font-size: 0.68em;
+  color: #8a8a8a;
+  word-break: break-word;
+}}
 nav.toc {{ text-align: left; }}
 nav.toc ol {{ list-style: none; padding: 0; }}
 nav.toc ol ol {{ padding-left: 1.2em; }}
@@ -194,7 +205,14 @@ def _title_page(config: BookConfig) -> str:
     return '<section class="front-matter title-page">\n' + "\n".join(parts) + "\n</section>"
 
 
-def _copyright_page(config: BookConfig) -> str:
+def _copyright_page(config: BookConfig, book_dir: Path | None = None) -> str:
+    """The copyright page, which is also where the build stamp belongs.
+
+    A rendered book is an artifact, and Chapter 1 of *Prompt to Production*
+    insists an artifact should be reproducible from its source and its recorded
+    build inputs. Recording them nowhere and asserting it anyway would be the
+    engine failing the book's own standard, on the book's own copyright page.
+    """
     rights = config.copyright
     holder = rights.holder or config.author.name
     lines = [f"<p>{_esc(config.title)}</p>"]
@@ -217,6 +235,12 @@ def _copyright_page(config: BookConfig) -> str:
 
     if config.isbn:
         lines.append(f"<p>ISBN {_esc(config.isbn)}</p>")
+
+    if book_dir is not None:
+        stamp = build_stamp(book_dir, ["bookkit"])
+        labels = labels_for(config.language)
+        lines.append(f'<p class="build-stamp">{_esc(labels["built_from"])} {_esc(stamp)}</p>')
+
     return '<section class="front-matter copyright">\n' + "\n".join(lines) + "\n</section>"
 
 
@@ -299,7 +323,7 @@ def front_matter_sections(
 ) -> list[str]:
     builders = {
         "title_page": lambda: _title_page(config),
-        "copyright": lambda: _copyright_page(config),
+        "copyright": lambda: _copyright_page(config, book_dir),
         "toc": lambda: _toc(config, chapters),
     }
     out = []
@@ -336,7 +360,11 @@ def iter_front_matter(
     labels = labels_for(config.language)
     builders = {
         "title_page": ("title-page", config.title or labels["title"], lambda: _title_page(config)),
-        "copyright": ("copyright", labels["copyright"], lambda: _copyright_page(config)),
+        "copyright": (
+            "copyright",
+            labels["copyright"],
+            lambda: _copyright_page(config, book_dir),
+        ),
     }
     docs = []
     for entry in config.front_matter:

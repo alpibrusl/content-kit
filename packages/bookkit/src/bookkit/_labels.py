@@ -12,6 +12,7 @@ from __future__ import annotations
 
 _LABELS: dict[str, dict[str, str]] = {
     "en": {
+        "built_from": "Built from",
         "glossary": "Glossary",
         "glossary_intro": (
             "Every term this book teaches, with the definition it commits to.\n"
@@ -26,6 +27,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "title": "Title",
     },
     "es": {
+        "built_from": "Construido desde",
         "glossary": "Glosario",
         "glossary_intro": (
             "Cada término que enseña este libro, con la definición a la que se compromete.\n"
@@ -40,6 +42,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "title": "Portada",
     },
     "fr": {
+        "built_from": "Compilé depuis",
         "glossary": "Glossaire",
         "glossary_intro": (
             "Chaque terme enseigné par ce livre, avec la définition qu'il retient.\n"
@@ -54,6 +57,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "title": "Titre",
     },
     "de": {
+        "built_from": "Gebaut aus",
         "glossary": "Glossar",
         "glossary_intro": (
             "Jeder Begriff, den dieses Buch lehrt, mit der Definition, auf die es sich festlegt.\n"
@@ -68,6 +72,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "title": "Titel",
     },
     "it": {
+        "built_from": "Compilato da",
         "glossary": "Glossario",
         "glossary_intro": (
             "Ogni termine che questo libro insegna, con la definizione a cui si attiene.\n"
@@ -82,6 +87,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "title": "Titolo",
     },
     "pt": {
+        "built_from": "Compilado a partir de",
         "glossary": "Glossário",
         "glossary_intro": (
             "Cada termo que este livro ensina, com a definição a que se compromete.\n"
@@ -96,6 +102,7 @@ _LABELS: dict[str, dict[str, str]] = {
         "title": "Título",
     },
     "ca": {
+        "built_from": "Construït des de",
         "glossary": "Glossari",
         "glossary_intro": (
             "Cada terme que ensenya aquest llibre, amb la definició a què es compromet.\n"

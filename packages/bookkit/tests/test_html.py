@@ -224,3 +224,29 @@ def test_the_running_head_is_suppressed_on_a_chapter_opening_page(tmp_book) -> N
 
     top_center = css[css.index("@top-center") : css.index("@bottom-center")]
     assert "string(chaptertitle, first-except)" in top_center
+
+
+def test_the_copyright_page_records_what_built_the_book(tmp_book) -> None:
+    """A rendered book is an artifact, and Chapter 1 of Prompt to Production
+    insists an artifact should be reproducible from its source and its recorded
+    build inputs. Recording them nowhere would be the engine failing the book's
+    own standard, on the book's own copyright page."""
+    raw = yaml.safe_load((tmp_book / "book.yaml").read_text())
+    raw["front_matter"] = ["copyright"]
+    config = BookConfig.model_validate(raw)
+
+    html = build_document(config, load_chapters(config, tmp_book), tmp_book)
+    assert 'class="build-stamp"' in html
+    assert "Built from source " in html
+    assert "bookkit" in html
+
+
+def test_the_build_stamp_speaks_the_book_s_language(tmp_book) -> None:
+    raw = yaml.safe_load((tmp_book / "book.yaml").read_text())
+    raw["front_matter"] = ["copyright"]
+    raw["language"] = "es"
+    config = BookConfig.model_validate(raw)
+
+    html = build_document(config, load_chapters(config, tmp_book), tmp_book)
+    assert "Construido desde source " in html
+    assert "Built from" not in html
